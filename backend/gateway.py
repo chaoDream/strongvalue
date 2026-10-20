@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .engine import DomainError, number
+from . import secret_provider
 
 
 class Candidate(BaseModel):
@@ -42,7 +43,7 @@ def configuration():
     local = parsed.hostname in ('localhost', '127.0.0.1', '::1')
     valid = bool(protocol in ('gateway', 'openai_responses') and url and model and parsed.hostname and not parsed.username and not parsed.password and not parsed.query and
                  (parsed.scheme == 'https' or (local and parsed.scheme == 'http')))
-    if protocol == 'openai_responses' and not os.getenv('QIANG_AI_GATEWAY_TOKEN'): valid = False
+    if protocol == 'openai_responses' and not secret_provider.configured(): valid = False
     return {'configured': valid, 'destination': parsed.netloc if valid else '', 'model': model if valid else '',
             'local': local, 'contract': 'qiangquote-extraction-v1', 'requires_consent': True,
             'protocol': protocol,
@@ -108,8 +109,9 @@ def request_gateway(document, raw, evidence):
     if config['protocol'] == 'openai_responses':
         payload = response_payload(config, document, raw, evidence, payload['instructions'])
     headers = {'Content-Type': 'application/json'}
-    if os.getenv('QIANG_AI_GATEWAY_TOKEN'):
-        headers['Authorization'] = 'Bearer '+os.environ['QIANG_AI_GATEWAY_TOKEN']
+    token = secret_provider.gateway_token()
+    if token:
+        headers['Authorization'] = 'Bearer '+token
     metadata = {}
     try:
         with httpx.Client(timeout=httpx.Timeout(90, connect=10), follow_redirects=False, trust_env=False) as client:

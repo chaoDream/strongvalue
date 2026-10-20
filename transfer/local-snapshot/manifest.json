@@ -1,0 +1,94 @@
+{
+  "platform": "macOS-26.5.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "python": "3.12.14",
+  "data_files": [
+    {
+      "path": "data/qiangquote.db",
+      "size": 49152,
+      "sha256": "cd686782abf10aadd5fc7b7b530f69e1c026896350d31f154a11a4ba88df6d9a"
+    },
+    {
+      "path": "data/exports/18769f6fed091fe3736c8adfec21c65506f3291b1a07ba0e7a4c7188043097fc",
+      "size": 106805,
+      "sha256": "18769f6fed091fe3736c8adfec21c65506f3291b1a07ba0e7a4c7188043097fc"
+    },
+    {
+      "path": "data/exports/6e585e1844712fd6fc61a1167532a6fae8a15f081dea6d5e266b41234bd64ca1",
+      "size": 106805,
+      "sha256": "6e585e1844712fd6fc61a1167532a6fae8a15f081dea6d5e266b41234bd64ca1"
+    }
+  ],
+  "dependency_volumes": [
+    {
+      "path": "dependencies.tar.gz.part000",
+      "size": 4194304,
+      "sha256": "3aaef69251396168fb89f7004c0c0cae596a6396c7a030aa663462c7f8dfd1ee"
+    },
+    {
+      "path": "dependencies.tar.gz.part001",
+      "size": 4194304,
+      "sha256": "df4f264ad8b9e05ebab06cf96317079377b87d06f60f2ff0c0b99b83f42eba44"
+    },
+    {
+      "path": "dependencies.tar.gz.part002",
+      "size": 4194304,
+      "sha256": "49ad4d4c96c0c413b5886ea77723c4818e99bc2dd51108933c728b503c064df5"
+    },
+    {
+      "path": "dependencies.tar.gz.part003",
+      "size": 4194304,
+      "sha256": "fe6f0f542a3a9034c430ce68821d2bbafb10958aefadcfac45356f849d81afb7"
+    },
+    {
+      "path": "dependencies.tar.gz.part004",
+      "size": 4194304,
+      "sha256": "125ec3bcfe39bc7e6d61994683a05d9d8960496996ed76847bcd8a8477017875"
+    },
+    {
+      "path": "dependencies.tar.gz.part005",
+      "size": 4194304,
+      "sha256": "1f366e6fc345feb97e31f31836776d224300e10a1ec0c501e099e2aa51b718fa"
+    },
+    {
+      "path": "dependencies.tar.gz.part006",
+      "size": 4194304,
+      "sha256": "8ae7fbb11d9bb22cda257c5acbe9c0a386b9441da5d476bc53de8b0927933205"
+    },
+    {
+      "path": "dependencies.tar.gz.part007",
+      "size": 4194304,
+      "sha256": "97b2c484c5cb6be71ccf77cfdb8546fdde843fe9153b5003df9b32379863adf0"
+    },
+    {
+      "path": "dependencies.tar.gz.part008",
+      "size": 4194304,
+      "sha256": "c627fc537e8d4b1cc5b92317724cd06489b81e861271c031f0db8116d07d0970"
+    },
+    {
+      "path": "dependencies.tar.gz.part009",
+      "size": 4194304,
+      "sha256": "ee32225863895b6c458b0fafe091a9eb03b189a23befe085174fe6965c06a60e"
+    },
+    {
+      "path": "dependencies.tar.gz.part010",
+      "size": 4194304,
+      "sha256": "b30336acd8b28ffe0dce56b4555b7d2c60f9a0e201207087583f48d4a5d100fa"
+    },
+    {
+      "path": "dependencies.tar.gz.part011",
+      "size": 4194304,
+      "sha256": "09480c7b3c00d195154f126319256e06953e89332c85766d5943715261ace621"
+    },
+    {
+      "path": "dependencies.tar.gz.part012",
+      "size": 1817839,
+      "sha256": "82db60f0270bf2655536009b81b9ec4a6520b06230266d2b5499accc93e6faf3"
+    }
+  ],
+  "excluded_absolute_symlinks": [
+    ".venv/bin/python3"
+  ],
+  "credentials": "Sessions removed; all user password hashes replaced. Reset passwords before login.",
+  "portability": "Dependency archive is a local platform snapshot. Install Python separately and recreate venv; use lock files on other platforms."
+}

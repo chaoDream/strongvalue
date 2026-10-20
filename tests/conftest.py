@@ -14,7 +14,9 @@ from backend.main import app, bootstrap
 
 @pytest.fixture
 def clients(tmp_path, monkeypatch):
-    for key in ['QIANG_AI_GATEWAY_URL', 'QIANG_AI_GATEWAY_TOKEN', 'QIANG_AI_MODEL', 'QIANG_AI_PROTOCOL']:
+    for key in ['QIANG_AI_GATEWAY_URL', 'QIANG_AI_GATEWAY_TOKEN', 'QIANG_AI_MODEL', 'QIANG_AI_PROTOCOL',
+                'QIANG_SECRET_ENDPOINT', 'QIANG_SECRET_SERVICE_TOKEN', 'QIANG_SECRET_SERVICE_TOKEN_FILE',
+                'QIANG_AI_GATEWAY_TOKEN_FILE']:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(store, 'ROOT', tmp_path)
     store.init()
