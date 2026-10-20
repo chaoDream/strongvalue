@@ -1,0 +1,13 @@
+.venv
+data
+frontend/node_modules
+frontend/dist
+.git
+.env
+tmp
+output
+__pycache__
+.pytest_cache
+
+frontend/public/pdf-assets
+.pnpm-store
