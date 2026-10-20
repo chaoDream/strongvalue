@@ -125,22 +125,31 @@ def tables(p, q, approved):
     if changes:
         result.append(('变更签证台账', ['清单', '原工程量', '变更后', '增减量', '单位', '原因及依据', '来源证据'],
                        [[x['name'], x['before_quantity'], x['quantity'], x['delta'], x['unit'], x['reason'], x['evidence_id']] for x in changes]))
+    price_changes = [x for x in snapshot.get('price_changes', []) if x['id'] in snapshot.get('applied_price_changes', [])]
+    if price_changes:
+        result.append(('资源调价台账', ['清单', '资源', '原单价', '新单价', '单位', '价格期次及税制', '来源及许可', '调价依据', '证据'],
+                       [[entry['boq_name'], entry['after']['name'], entry['before']['price'], entry['after']['price'], entry['after']['unit'],
+                         entry['after']['period']+' / '+entry['after']['tax_mode'], entry['after']['source']+' / '+entry['after']['license'],
+                         change['reason'], entry['after']['evidence_id']] for change in price_changes for entry in change['entries']]))
     return watermark, result
 
 
-def export_report(p, q, fmt, approved):
+def export_report(p, q, fmt, approved, template=None):
     label, sections = tables(p, q, approved)
+    if template:
+        sections[0][2].extend([['编制单位', template['organization']], ['企业模板', template['name']+' V'+str(template['version'])],
+                               ['内部说明', template['cover_note']], ['模板性质', template['purpose']]])
     output = io.BytesIO()
     if fmt == 'json':
         data = {'project': {'id': p['id'], 'name': p['name'], 'scope': p['scope']}, 'status': label,
                 'quote': q, 'report_reviews': [r for r in p['reviews'] if q and r['collection'] == 'quotes' and r['object_id'] == q['id']],
                 'unpriced': None if q else {k: p[k] for k in ['documents', 'evidence', 'facts', 'components', 'takeoffs', 'boq', 'reviews']},
-                'tables': sections}
+                'tables': sections, 'report_template': template}
         return json.dumps(data, ensure_ascii=False, indent=2).encode(), 'application/json', 'json'
     if fmt == 'xlsx':
         wb = Workbook()
         wb.remove(wb.active)
-        numeric_headers = {'总金额', '分部分项金额', '工程量', '单价', '合价', '基数', '费率', '金额', '消耗', '换算系数', '资源价格', '单价贡献'}
+        numeric_headers = {'总金额', '分部分项金额', '工程量', '单价', '原单价', '新单价', '合价', '基数', '费率', '金额', '消耗', '换算系数', '资源价格', '单价贡献'}
         for title, headers, rows in sections:
             s = wb.create_sheet(title)
             s.append([title+' — '+label])
@@ -152,7 +161,7 @@ def export_report(p, q, fmt, approved):
                 s.append(['未提供 / 待编制'])
             for cell in s[1]+s[2]:
                 cell.font = Font(name='Microsoft YaHei', color='FFFFFF', bold=True, size=11)
-                cell.fill = PatternFill('solid', fgColor='173B36')
+                cell.fill = PatternFill('solid', fgColor=template['accent'] if template else '173B36')
             for row in s.iter_rows(min_row=3):
                 for cell in row:
                     # Force strings to text to prevent spreadsheet formula injection.
@@ -178,12 +187,15 @@ def export_report(p, q, fmt, approved):
             s.page_setup.fitToHeight = 0
             s.oddHeader.center.text = label
             s.oddFooter.center.text = '第 &P 页 / 共 &N 页'
+            if template:
+                s.oddFooter.left.text = template['footer'].replace('&', '&&')
         wb.save(output)
         return output.getvalue(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx'
     if fmt == 'pdf':
         font = chinese_font()
         normal = ParagraphStyle('body', fontName=font, fontSize=8, leading=12, wordWrap='CJK')
         title_style = ParagraphStyle('title', parent=normal, fontSize=18, leading=26, spaceAfter=14)
+        header_style = ParagraphStyle('table-header', parent=normal, textColor=colors.white if template else colors.black)
         def para(v):
             return Paragraph(escape(str(v)).replace('\n', '<br/>'), normal)
         story = []
@@ -192,11 +204,11 @@ def export_report(p, q, fmt, approved):
                 story.append(PageBreak())
             story.extend([Paragraph(escape(title), title_style), para(label), Spacer(1, 6*mm)])
             # Bound huge evidence excerpts and wrap unbroken hashes.
-            content = [[para(h) for h in headers]]+[[para(str(v)) for v in row] for row in rows]
+            content = [[Paragraph(escape(h), header_style) for h in headers]]+[[para(str(v)) for v in row] for row in rows]
             if len(content) == 1:
                 content.append([para('未提供 / 待编制')]+[para('') for _ in headers[1:]])
             t = Table(content, colWidths=[260*mm/len(headers)]*len(headers), repeatRows=1, splitInRow=1)
-            t.setStyle(TableStyle([('BACKGROUND', (0,0),(-1,0),colors.HexColor('#DFEBE6')),
+            t.setStyle(TableStyle([('BACKGROUND', (0,0),(-1,0),colors.HexColor('#'+template['accent'] if template else '#DFEBE6')),
                                   ('GRID',(0,0),(-1,-1),.3,colors.HexColor('#C7D6D0')),
                                   ('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),5),
                                   ('RIGHTPADDING',(0,0),(-1,-1),5),('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)]))
@@ -206,6 +218,8 @@ def export_report(p, q, fmt, approved):
             canvas.setFont(font, 8)
             canvas.setFillColor(colors.HexColor('#7A8C85'))
             canvas.drawString(18*mm, 12*mm, label)
+            if template and template['footer']:
+                canvas.drawString(18*mm, 8*mm, template['footer'])
             canvas.drawRightString(278*mm, 12*mm, str(doc.page))
             canvas.restoreState()
         doc = SimpleDocTemplate(output, pagesize=(297*mm,210*mm), leftMargin=18*mm,rightMargin=18*mm,topMargin=17*mm,bottomMargin=20*mm)

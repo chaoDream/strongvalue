@@ -2,6 +2,8 @@ import React, {useEffect, useState} from 'react';
 import {Plus, Upload, GitCompareArrows, Split, Merge, FilePenLine, FlaskConical, CalendarDays, BookOpen, Search, ScanText, X, RefreshCw, FileCheck2, ExternalLink} from 'lucide-react';
 
 import MembersPanel from './MembersPanel';
+import WorkflowPanel from './WorkflowPanel';
+import ReportTemplatesPanel from './ReportTemplatesPanel';
 import PdfPreview from './DocumentPreview';
 
 type Obj = Record<string, any>;
@@ -9,6 +11,8 @@ type Props = {
   section: string; p: Obj; user: Obj; request: (path:string, method?:string, data?:any)=>Promise<any>;
   refresh: ()=>Promise<any>; onReview:(collection:string,item:Obj)=>void;
   sourceLink:(id:string)=>React.ReactNode; onComponent:(item:Obj)=>void; quoteId?:string;
+  reviewDetails:(collection:string,item:Obj)=>React.ReactNode;
+  reportTemplateId:string; onReportTemplateChange:(id:string)=>void;
 };
 const status:Obj={superseded:'历史来源',draft:'待复核',approved:'已审定',rejected:'已拒绝',stale:'已失效',needs_info:'待补件',conflict:'存在冲突',failed:'失败',completed:'完成',running:'执行中',queued:'待处理'};
 const cash=(v:any)=>Number(v).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -18,11 +22,11 @@ function F({label,children}:any){return <label className="field"><span>{label}</
 function B({children,onClick,disabled=false,type='button'}:any){return <button type={type} className="btn" onClick={onClick} disabled={disabled}>{children}</button>}
 function Grid({headers,children}:any){return <div className="table-wrap"><table><thead><tr>{headers.map((h:string)=><th key={h}>{h}</th>)}</tr></thead><tbody>{children}</tbody></table></div>}
 
-export default function EngineeringTools({section,p,user,request,refresh,onReview,sourceLink,onComponent,quoteId}:Props){
+export default function EngineeringTools({section,p,user,request,refresh,onReview,sourceLink,onComponent,quoteId,reviewDetails,reportTemplateId,onReportTemplateChange}:Props){
  const base='/projects/'+p.id, editable=user.role!=='reviewer';
  const [dialog,setDialog]=useState<Obj|null>(null),[error,setError]=useState(''),[working,setWorking]=useState(false),[preview,setPreview]=useState<Obj|null>(null),[comparison,setComparison]=useState<Obj|null>(null),[options,setOptions]=useState<Obj[]>([]),[ai,setAi]=useState<Obj|null>(null),[pdf,setPdf]=useState(''),[types,setTypes]=useState<Obj>({});
  useEffect(()=>{setDialog(null);setPreview(null);setComparison(null);setError('');setPdf('');},[p.id]);
- useEffect(()=>{setPdf('');},[quoteId]);
+ useEffect(()=>{setPdf('');},[quoteId,reportTemplateId]);
  useEffect(()=>{if(section==='takeoff'||section==='settings'){request('/ai/capabilities').then(setAi).catch(e=>setError(e.message));request('/takeoff-types').then(setTypes).catch(e=>setError(e.message));}},[section,p.id]);
  const update=(key:string,value:any)=>setDialog(d=>({...d,[key]:value}));
  async function run(action:()=>Promise<any>,close=true){setWorking(true);setError('');try{const result=await action();await refresh();if(close)setDialog(null);return result;}catch(e:any){setError(e.message);return null}finally{setWorking(false)}}
@@ -31,7 +35,7 @@ export default function EngineeringTools({section,p,user,request,refresh,onRevie
  const boqPicker=(value:string,change:(s:string)=>void,approved=false)=><select required value={value||''} onChange={e=>change(e.target.value)}><option value="">选择清单项</option>{p.boq.filter((b:Obj)=>!approved||b.state==='approved').map((b:Obj)=><option key={b.id} value={b.id}>{b.code||'待编码'} · {b.name} · {b.quantity}{b.unit}</option>)}</select>;
  const quotePicker=(value:string,change:(s:string)=>void)=><select required value={value||''} onChange={e=>change(e.target.value)}><option value="">选择报价版本</option>{p.quotes.map((q:Obj)=><option key={q.id} value={q.id}>V{q.version} · ¥{cash(q.total)}</option>)}</select>;
  const latest=p.quotes.at(-1);
- async function generatePreview(){await run(async()=>{const r=await fetch('/api/v1'+base+'/exports?format=pdf'+(quoteId?'&quote_id='+quoteId:''));if(!r.ok)throw new Error((await r.json()).detail);await r.arrayBuffer();const list=await request(base+'/artifacts');setPdf(list.find((a:Obj)=>a.format==='pdf'&&a.quote_id===(quoteId||null))?.id||'');},false)}
+ async function generatePreview(){await run(async()=>{const r=await fetch('/api/v1'+base+'/exports?format=pdf'+(quoteId?'&quote_id='+quoteId:'')+(reportTemplateId?'&template_id='+encodeURIComponent(reportTemplateId):''));if(!r.ok)throw new Error((await r.json()).detail);await r.arrayBuffer();const list=await request(base+'/artifacts');setPdf(list.find((a:Obj)=>a.format==='pdf'&&a.quote_id===(quoteId||null)&&(a.template?.id||'')===reportTemplateId)?.id||'');},false)}
 
  function renderDialog(){
   if(!dialog)return null;
@@ -93,6 +97,8 @@ export default function EngineeringTools({section,p,user,request,refresh,onRevie
  }
 
  return <div className="engineering-tools">
+  <WorkflowPanel section={section} p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink} reviewDetails={reviewDetails}/>
+  <ReportTemplatesPanel section={section} user={user} request={request} value={reportTemplateId} onChange={onReportTemplateChange}/>
   {error&&!dialog&&<div role="alert" className="error-banner">{error}<button className="icon-btn" onClick={()=>setError('')} aria-label="关闭提示"><X size={15}/></button></div>}
   {section==='boq'&&<><div className="tool-strip"><B disabled={!editable} onClick={()=>open('import')}><Upload size={15}/>导入已有清单</B><B disabled={!editable||!p.boq.length} onClick={()=>open('split',{boq_id:'',parts:[{name:'',quantity:''},{name:'',quantity:''}]})}><Split size={15}/>拆分清单</B><B disabled={!editable||p.boq.length<2} onClick={()=>open('merge',{ids:[],name:''})}><Merge size={15}/>合并清单</B><B disabled={!editable||!p.boq.some((b:Obj)=>b.state==='approved')} onClick={()=>open('change',{boq_id:'',quantity:'',evidence_id:'',reason:''})}><FilePenLine size={15}/>建立变更签证</B></div>{p.changes.length>0&&<section className="card space-bottom"><div className="section-head"><div><h2>变更与签证台账</h2><p>独立审批、保留基线，应用后重新审定清单</p></div></div><Grid headers={['清单','原工程量','变更后','增减量','状态','操作']}>{p.changes.map((c:Obj)=><tr key={c.id}><td>{c.name}</td><td>{c.before_quantity}</td><td>{c.quantity} {c.unit}</td><td>{c.delta}</td><td>{status[c.state]}{p.applied_changes.includes(c.id)?' · 已应用':''}</td><td><div className="actions"><button className="text-btn" onClick={()=>onReview('changes',c)}>复核依据</button>{!p.applied_changes.includes(c.id)&&<button className="text-btn" disabled={!editable||working||c.state!=='approved'} onClick={()=>run(()=>request(base+'/changes/'+c.id+'/apply','POST'))}>应用变更</button>}</div></td></tr>)}</Grid></section>}</>}
   {section==='summary'&&<><div className="tool-strip"><B disabled={!editable} onClick={()=>open('settings',{pricing_date:p.pricing_date||today(),scope:[...p.scope],require_golden_baseline:!!p.require_golden_baseline,reason:''})}><CalendarDays size={15}/>适用日期与范围</B><B disabled={p.quotes.length<2} onClick={()=>open('compare',{left:p.quotes.at(-2)?.id,right:latest?.id})}><GitCompareArrows size={15}/>报价版本差异</B><B disabled={!editable||!latest} onClick={()=>open('scenario',{quote_id:latest?.id,name:'内部成本敏感性测算',quantity_factor:'1',material_factor:'1',labor_factor:'1',machinery_factor:'1'})}><FlaskConical size={15}/>内部敏感性测算</B><span className="tool-hint">计价适用日：{p.pricing_date||today()}</span></div>{p.scenarios.length>0&&<section className="card space-bottom"><div className="section-head"><div><h2>内部测算记录</h2><p>假设性分析，与审核报价独立保留</p></div></div><Grid headers={['测算','基准版本','基准总价','测算总价','差额']}>{p.scenarios.map((s:Obj)=><tr key={s.id}><td>{s.name}<small className="block muted">数量×{s.factors.quantity_factor} / 材料×{s.factors.material_factor} / 人工×{s.factors.labor_factor} / 机械×{s.factors.machinery_factor}</small></td><td>V{s.base_version}</td><td>{cash(s.base_total)}</td><td>{cash(s.total)}</td><td className="num">{cash(s.delta)}</td></tr>)}</Grid></section>}</>}

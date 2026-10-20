@@ -2651,3 +2651,24 @@ input::placeholder,textarea::placeholder {
 .pdf-loading {padding:70px 15px;display:flex;align-items:center;justify-content:center;gap:10px;font-size:11px;color:#94a982;}
 .pdf-rendering {position:sticky;bottom:10px;left:10px;display:inline-block;background:#fffdf0ef;color:#a19a6e;padding:7px 12px;border:1px solid #e8e6cd;border-radius:5px;font-size:10px;}
 @media(max-width:700px){.pdf-canvas-scroll{min-height:280px;max-height:650px;padding:10px}.pdf-controls{gap:4px;padding:7px}.pdf-page-label input{width:41px}.pdf-controls .icon-btn{padding:4px}.pdf-zoom{font-size:8px;min-width:26px}}
+.allocation-panel .section-head h2 { display:flex; align-items:center; gap:8px; }
+.allocation-panel .section-head p { max-width:720px; line-height:1.6; }
+.allocation-issues { padding:0 24px; color:#916b35; line-height:1.8; margin-bottom:20px; }
+.price-change-record { padding:20px 24px; border-top:1px solid var(--border,#dbe5df); }
+.price-change-record > p { margin:6px 0 14px; line-height:1.7; }
+.price-change-record summary, .batch-target summary { cursor:pointer; color:#3c6a5c; padding:10px 0; }
+.price-change-record .section-head { padding:0; }
+.batch-targets { max-height:430px; overflow:auto; margin-bottom:20px; }
+.batch-target { padding:14px; border:1px solid #dce5e0; border-radius:9px; margin-bottom:10px; }
+.batch-target .review-human { margin-top:12px; }
+.resource-price-selection { max-height:320px; overflow:auto; margin-bottom:14px; }
+.resource-price-selection table { width:100%; }
+.resource-price-selection td input[type=number] { min-width:100px; max-width:160px; }
+.workflow-modal .tool-strip > input { max-width:250px; }
+.template-controls, .template-summary, .template-note { margin:16px 24px; }
+.template-controls { display:flex; gap:14px; align-items:center; }
+.template-controls .field { flex:1; margin:0; }
+.template-summary { background:#f4f7f5; border-radius:8px; padding:16px; line-height:1.7; }
+.template-summary p { white-space:pre-wrap; overflow-wrap:anywhere; }
+.template-panel .section-head h2 { display:flex; gap:8px; align-items:center; }
+@media(max-width:640px) { .template-controls { flex-direction:column; align-items:stretch; } }

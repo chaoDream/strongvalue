@@ -18,12 +18,12 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.2.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.3.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
                 '给排水': '管线平纵断面、材质及埋深', '电气': '配电系统及敷设方式', '合同计价': '合同、计量与取费依据'}
-REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations'}
+REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes'}
 
 
 def password_hash(password, salt=None):
@@ -75,7 +75,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes']:
         p.setdefault(key, [])
     return p
 
@@ -121,7 +121,9 @@ def gaps(p):
 
 
 def blockers(p):
+    from .workflows import allocation_diagnostics
     out = [x['specialty']+'资料尚未复核完整' for x in gaps(p) if x['blocking']]
+    out.extend(x['message'] for x in allocation_diagnostics(p)['issues'] if x['blocking'])
     if any(x['state'] not in ('approved', 'rejected', 'superseded') for x in p['facts']):
         out.append('存在未审核或冲突的工程事实')
     if any(x['state'] == 'conflict' for x in p.get('dimension_candidates', [])):
@@ -139,6 +141,8 @@ def blockers(p):
         out.append('计价规则依据已替代或缺失')
     if any(x['state'] != 'rejected' and x['id'] not in p.get('applied_changes', []) for x in p.get('changes', [])):
         out.append('存在待审或已审未应用的变更签证')
+    if any(x['state'] != 'rejected' and x['id'] not in p.get('applied_price_changes', []) for x in p.get('price_changes', [])):
+        out.append('存在待审或已审未应用的资源调价')
     if p.get('require_golden_baseline'):
         from .reconciliation import quantity_hash
         if not any(r['state'] == 'approved' and r['passed'] and r['input_hash'] == quantity_hash(p) for r in p.get('reconciliations', [])):
@@ -157,6 +161,10 @@ def price_blockers(p):
             if not q.get('license') or not q.get('edition') or not q.get('source') or not q.get('resources'):
                 out.append(item['name']+'缺少定额版本、授权、来源或消耗')
             for r in q.get('resources', []):
+                if r.get('price_change_id'):
+                    change = next((x for x in p.get('price_changes', []) if x['id'] == r['price_change_id']), None)
+                    if not change or change['state'] != 'approved' or change['id'] not in p.get('applied_price_changes', []):
+                        out.append(r.get('name', '资源')+'调价审批已失效，须建立并审定新的价格修正')
                 tax_modes.add(r.get('tax_mode'))
                 if r.get('region') != p['region']:
                     out.append(r.get('name', '资源')+'价格地区与项目不一致')
@@ -617,100 +625,111 @@ def coverage(pid: str, body: dict, a=Depends(actor)):
     return p['coverage'][s]
 
 
-@app.post('/api/v1/projects/{pid}/reviews')
-def review(pid: str, body: dict, a=Depends(actor)):
+def apply_review(c, p, body, a, hash_verified=False):
     if a['role'] != 'reviewer':
         raise HTTPException(403, '仅独立复核账号可以签署审核')
     collection = body.get('collection')
     if collection not in REVIEW_COLLECTIONS:
         raise HTTPException(422, '审核对象类型无效')
-    if body.get('decision') not in ['approve', 'reject', 'request_more_info'] or not body.get('reason', '').strip():
+    if body.get('decision') not in ['approve', 'reject', 'request_more_info'] or not isinstance(body.get('reason'), str) or not body['reason'].strip() or len(body['reason']) > 3000:
         raise HTTPException(422, '审核决定和依据必填')
-    with store.transaction() as c:
-        p = project(c, pid, a)
-        target = review_target(p, collection, body.get('object_id'))
-        if not target:
-            raise HTTPException(404, '审核对象不存在')
-        if body.get('object_hash') != store.digest(target):
-            raise HTTPException(409, '对象已变更，请刷新后重新复核')
-        approve = body['decision'] == 'approve'
-        if approve:
-            if collection == 'facts':
-                if any(f['key'] == target['key'] and f['value'] != target['value'] and f['state'] not in ('rejected','superseded') for f in p['facts']):
-                    raise HTTPException(409, '先拒绝冲突候选，再核准选定值')
-                require_evidence(p, target['evidence_id'])
-            if collection == 'dimension_candidates':
-                require_evidence(p, target['evidence_id'])
-                if any(x['component_name'] and x['component_name'] == target['component_name'] and x['parameter'] == target['parameter'] and Decimal(x['value']) != Decimal(target['value']) and x['state'] not in ('rejected','superseded') for x in p['dimension_candidates']):
-                    raise HTTPException(409, '同构件同参数存在冲突值，请先拒绝不采纳候选')
-            if collection == 'components':
-                for eid in target['evidence'].values():
-                    require_evidence(p, eid)
-            if collection == 'takeoffs':
-                if target.get('source_kind') in ('imported_boq', 'change_order'):
-                    for eid in target['evidence'].values(): require_evidence(p, eid)
-                    if target.get('change_id') and (target['change_id'] not in p['applied_changes'] or find(p, 'changes', target['change_id'])['state'] != 'approved'):
-                        raise HTTPException(409, '变更尚未审定应用或审批已被撤回')
-                else:
-                    comp = find(p, 'components', target['component_id'])
-                    if comp['state'] != 'approved' or target['component_hash'] != store.digest(comp):
-                        raise HTTPException(409, '构件已变化，请重新算量')
-            if collection == 'boq':
-                if not target.get('code') or not target.get('features'):
-                    raise HTTPException(409, '请补充有依据的清单编码和项目特征')
-                from .extensions import validate_links
-                validate_links(p, target)
-            if collection == 'rules':
-                require_evidence(p, target['evidence_id'])
-                if target['region'] != p['region'] or not date.fromisoformat(target['valid_from']) <= effective_date(p) <= date.fromisoformat(target['valid_until']):
-                    raise HTTPException(409, '规则包地区或有效期不适用')
-            if collection == 'changes':
-                require_evidence(p, target['evidence_id'])
-                if target['base_hash'] != store.digest(find(p, 'boq', target['boq_id'])):
-                    raise HTTPException(409, '变更基线已变化，请重新建立变更')
-            if collection == 'catalog':
-                if price_blockers({**p, 'boq': [target]}):
-                    raise HTTPException(409, '定额候选来源、许可、价格或适用期间不完整')
-            if collection == 'reconciliations':
-                from .reconciliation import quantity_hash
-                require_evidence(p, target['evidence_id'])
-                if not target['passed'] or target['input_hash'] != quantity_hash(p):
-                    raise HTTPException(409, '底稿对照不通过或当前工程量已变化；请解决差异后重新对账')
-            if collection == 'quotes':
-                issues = blockers(p)
-                if issues or target['id'] in p['stale_quotes']:
-                    raise HTTPException(409, '报告审批阻断：'+'；'.join(issues or ['输入已变更']))
-        record = {'id': store.uid(), 'collection': collection, 'object_id': target['id'], 'decision': body['decision'],
-                  'reason': body['reason'], 'object_hash': body['object_hash'], 'reviewer': a['username'], 'timestamp': store.now()}
-        p['reviews'].append(record)
+    target = review_target(p, collection, body.get('object_id'))
+    if not target:
+        raise HTTPException(404, '审核对象不存在')
+    if not hash_verified and body.get('object_hash') != store.digest(target):
+        raise HTTPException(409, '对象已变更，请刷新后重新复核')
+    approve = body['decision'] == 'approve'
+    if approve:
+        if collection == 'facts':
+            if any(f['key'] == target['key'] and f['value'] != target['value'] and f['state'] not in ('rejected','superseded') for f in p['facts']):
+                raise HTTPException(409, '先拒绝冲突候选，再核准选定值')
+            require_evidence(p, target['evidence_id'])
+        if collection == 'dimension_candidates':
+            require_evidence(p, target['evidence_id'])
+            if any(x['component_name'] and x['component_name'] == target['component_name'] and x['parameter'] == target['parameter'] and Decimal(x['value']) != Decimal(target['value']) and x['state'] not in ('rejected','superseded') for x in p['dimension_candidates']):
+                raise HTTPException(409, '同构件同参数存在冲突值，请先拒绝不采纳候选')
+        if collection == 'components':
+            for eid in target['evidence'].values():
+                require_evidence(p, eid)
+        if collection == 'takeoffs':
+            if target.get('source_kind') in ('imported_boq', 'change_order'):
+                for eid in target['evidence'].values(): require_evidence(p, eid)
+                if target.get('change_id') and (target['change_id'] not in p['applied_changes'] or find(p, 'changes', target['change_id'])['state'] != 'approved'):
+                    raise HTTPException(409, '变更尚未审定应用或审批已被撤回')
+            else:
+                comp = find(p, 'components', target['component_id'])
+                if comp['state'] != 'approved' or target['component_hash'] != store.digest(comp):
+                    raise HTTPException(409, '构件已变化，请重新算量')
+        if collection == 'boq':
+            if not target.get('code') or not target.get('features'):
+                raise HTTPException(409, '请补充有依据的清单编码和项目特征')
+            from .extensions import validate_links
+            validate_links(p, target)
+        if collection == 'rules':
+            require_evidence(p, target['evidence_id'])
+            if target['region'] != p['region'] or not date.fromisoformat(target['valid_from']) <= effective_date(p) <= date.fromisoformat(target['valid_until']):
+                raise HTTPException(409, '规则包地区或有效期不适用')
+        if collection == 'changes':
+            require_evidence(p, target['evidence_id'])
+            if target['base_hash'] != store.digest(find(p, 'boq', target['boq_id'])):
+                raise HTTPException(409, '变更基线已变化，请重新建立变更')
+        if collection == 'catalog':
+            if price_blockers({**p, 'boq': [target]}):
+                raise HTTPException(409, '定额候选来源、许可、价格或适用期间不完整')
+        if collection == 'reconciliations':
+            from .reconciliation import quantity_hash
+            require_evidence(p, target['evidence_id'])
+            if not target['passed'] or target['input_hash'] != quantity_hash(p):
+                raise HTTPException(409, '底稿对照不通过或当前工程量已变化；请解决差异后重新对账')
+        if collection == 'price_changes':
+            from .workflows import validate_price_change
+            validate_price_change(p, target)
         if collection == 'quotes':
-            p['report_approval'] = {'quote_id': target['id'], 'review_id': record['id']} if approve else None
-            p['status'] = 'REPORT_APPROVED' if approve else 'REPORT_DRAFT'
-        else:
-            target['state'] = 'approved' if approve else 'rejected' if body['decision'] == 'reject' else 'needs_info'
-            if collection == 'changes' and not approve and target['id'] in p['applied_changes']:
+            issues = blockers(p)
+            if issues or target['id'] in p['stale_quotes']:
+                raise HTTPException(409, '报告审批阻断：'+'；'.join(issues or ['输入已变更']))
+    record = {'id': store.uid(), 'collection': collection, 'object_id': target['id'], 'decision': body['decision'],
+              'reason': body['reason'], 'object_hash': body['object_hash'], 'reviewer': a['username'], 'timestamp': store.now()}
+    p['reviews'].append(record)
+    if collection == 'quotes':
+        p['report_approval'] = {'quote_id': target['id'], 'review_id': record['id']} if approve else None
+        p['status'] = 'REPORT_APPROVED' if approve else 'REPORT_DRAFT'
+    else:
+        target['state'] = 'approved' if approve else 'rejected' if body['decision'] == 'reject' else 'needs_info'
+        if collection == 'changes' and not approve and target['id'] in p['applied_changes']:
+            for b in p['boq']:
+                if b.get('change_id') == target['id']:
+                    b['state'] = 'stale'
+                    find(p, 'takeoffs', b['takeoff_id'])['state'] = 'stale'
+        if not approve:
+            if collection == 'price_changes':
                 for b in p['boq']:
-                    if b.get('change_id') == target['id']:
+                    if any(r.get('price_change_id') == target['id'] for q in b['quotas'] for r in q['resources']):
                         b['state'] = 'stale'
-                        find(p, 'takeoffs', b['takeoff_id'])['state'] = 'stale'
-            if not approve:
-                if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations'):
-                    invalidate(p, 'quotes')
-                else:
-                    invalidate(p, collection)
-            elif collection in ('takeoffs', 'boq') and all(x['state'] == 'approved' for x in p[collection]):
-                p['status'] = 'TAKEOFF_APPROVED' if collection == 'takeoffs' else 'BOQ_APPROVED'
-        store.audit(c, p, a, 'REVIEW_DECISION', record)
-        store.save(c, p)
+            if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes'):
+                invalidate(p, 'quotes')
+            else:
+                invalidate(p, collection)
+        elif collection in ('takeoffs', 'boq') and all(x['state'] == 'approved' for x in p[collection]):
+            p['status'] = 'TAKEOFF_APPROVED' if collection == 'takeoffs' else 'BOQ_APPROVED'
+    store.audit(c, p, a, 'REVIEW_DECISION', record)
     return record
 
+
+@app.post('/api/v1/projects/{pid}/reviews')
+def review(pid: str, body: dict, a=Depends(actor)):
+    with store.transaction() as c:
+        p = project(c, pid, a)
+        record = apply_review(c, p, body, a)
+        store.save(c, p)
+    return record
 
 @app.get('/api/v1/projects/{pid}/hashes')
 def object_hashes(pid: str, a=Depends(actor)):
     with store.connect() as c:
         p = project(c, pid, a)
     return {key: {x['id']: store.digest(x) for x in (list(p[key].values()) if key == 'coverage' else p[key])}
-            for key in ['facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations']}
+            for key in REVIEW_COLLECTIONS}
 
 
 @app.post('/api/v1/projects/{pid}/quotes/calculate')
@@ -733,6 +752,7 @@ def quote(pid: str, a=Depends(actor)):
                     'documents': p['documents'], 'components': p['components'], 'facts': p['facts'], 'reviews': p['reviews'], 'coverage': p['coverage'],
                     'pricing_date': effective_date(p).isoformat(), 'changes': p['changes'], 'applied_changes': p['applied_changes'],
                     'reconciliations': p['reconciliations'], 'require_golden_baseline': p.get('require_golden_baseline', False)}
+        snapshot.update(price_changes=p['price_changes'], applied_price_changes=p['applied_price_changes'])
         result = calculate(p['boq'], ruleset)
         q = {'id': store.uid(), 'version': len(p['quotes'])+1, 'created_at': store.now(), 'state': 'draft',
              'input_hash': store.digest(snapshot), 'snapshot': json.loads(store.canonical(snapshot)), **result,
@@ -766,17 +786,19 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.2.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.3.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
-def export(pid: str, format: str = 'json', quote_id: str = '', a=Depends(actor)):
+def export(pid: str, format: str = 'json', quote_id: str = '', template_id: str = '', a=Depends(actor)):
     from .reports import export_report
     with store.transaction() as c:
         p = project(c, pid, a)
         q = find(p, 'quotes', quote_id) if quote_id else (p['quotes'][-1] if p['quotes'] else None)
         approved = bool(q and p['report_approval'] and p['report_approval']['quote_id'] == q['id'] and q['id'] not in p['stale_quotes'] and not blockers(p))
-        payload, media, suffix = export_report(p, q, format, approved)
+        from .templates import find_template
+        template = find_template(c, template_id, a['tenant']) if template_id else None
+        payload, media, suffix = export_report(p, q, format, approved, template)
         sha = hashlib.sha256(payload).hexdigest()
         directory = store.ROOT/'exports'
         directory.mkdir(exist_ok=True)
@@ -785,6 +807,7 @@ def export(pid: str, format: str = 'json', quote_id: str = '', a=Depends(actor))
             path.write_bytes(payload)
         artifact = {'id': store.uid(), 'format': format, 'quote_id': q['id'] if q else None, 'quote_version': q['version'] if q else None,
                     'hash': sha, 'approved': approved, 'timestamp': store.now(), 'actor': a['username'], 'media': media, 'suffix': suffix}
+        artifact.update(template=template, template_hash=store.digest(template) if template else None)
         c.execute('INSERT INTO artifacts VALUES(?,?,?,?)', (artifact['id'], pid, a['tenant'], store.canonical(artifact)))
         store.audit(c, p, a, 'EXPORT_COMPLETED', artifact)
     return StreamingResponse(io.BytesIO(payload), media_type=media,
@@ -835,6 +858,10 @@ from .analysis_routes import router as analysis_router
 app.include_router(analysis_router)
 from .reconciliation import router as reconciliation_router
 app.include_router(reconciliation_router)
+from .workflows import router as workflow_router
+app.include_router(workflow_router)
+from .templates import router as template_router
+app.include_router(template_router)
 
 dist = Path(__file__).parent.parent/'frontend'/'dist'
 if dist.exists():

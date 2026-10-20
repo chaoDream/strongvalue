@@ -45,6 +45,9 @@ def init():
         CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, tenant TEXT NOT NULL, data TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS audit(seq INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT, tenant TEXT, data TEXT, hash TEXT);
         CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, project_id TEXT, tenant TEXT, data TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS report_templates(id TEXT PRIMARY KEY, tenant TEXT NOT NULL, family TEXT NOT NULL, version INTEGER NOT NULL, data TEXT NOT NULL, UNIQUE(tenant,family,version));
+        CREATE TRIGGER IF NOT EXISTS template_no_update BEFORE UPDATE ON report_templates BEGIN SELECT RAISE(ABORT, 'immutable template'); END;
+        CREATE TRIGGER IF NOT EXISTS template_no_delete BEFORE DELETE ON report_templates BEGIN SELECT RAISE(ABORT, 'immutable template'); END;
         CREATE TRIGGER IF NOT EXISTS artifact_no_update BEFORE UPDATE ON artifacts BEGIN SELECT RAISE(ABORT, 'immutable artifact'); END;
         CREATE TRIGGER IF NOT EXISTS artifact_no_delete BEFORE DELETE ON artifacts BEGIN SELECT RAISE(ABORT, 'immutable artifact'); END;
         CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'immutable audit'); END;
