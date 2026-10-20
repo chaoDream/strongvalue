@@ -1,0 +1,15 @@
+.venv/
+node_modules/
+frontend/dist/
+data/
+__pycache__/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+.DS_Store
+output/
+tmp/
+frontend/*.tsbuildinfo
+frontend/public/pdf-assets/
+.pnpm-store/
