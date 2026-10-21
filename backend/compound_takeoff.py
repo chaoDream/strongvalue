@@ -130,5 +130,15 @@ def validate(p, comp, saved=False):
     return result, stamp
 
 
+def structured_validator(kind):
+    if kind == 'planar_regions':
+        from .planar_takeoff import validate as validate_planar
+        return validate_planar
+    return validate
+
+
 def component_quantity(comp):
+    if comp['kind'] == 'planar_regions':
+        from .planar_takeoff import calculate as calculate_planar
+        return calculate_planar(comp)
     return calculate(comp) if comp['kind'] == 'compound' else takeoff(comp['kind'], comp['parameters'])

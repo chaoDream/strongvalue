@@ -16,10 +16,10 @@ from pydantic import BaseModel, Field
 
 from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
-from .compound_takeoff import component_quantity
+from .compound_takeoff import component_quantity, structured_validator
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.24.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.25.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -172,11 +172,10 @@ def blockers(p):
         from .reconciliation import matches_context
         if not any(r['state'] == 'approved' and r['passed'] and matches_context(p,r) for r in p.get('reconciliations', [])):
             out.append('缺少覆盖当前工程量的已审专业黄金底稿对照')
-    from .compound_takeoff import validate as validate_compound
     for comp in p['components']:
-        if comp['kind'] == 'compound':
+        if comp['kind'] in ('compound','planar_regions'):
             try:
-                validate_compound(p, comp, saved=True)
+                structured_validator(comp['kind'])(p, comp, saved=True)
             except (HTTPException, DomainError) as exc:
                 out.append(comp['name']+'：'+str(getattr(exc, 'detail', exc)))
     out.extend(price_blockers(p))
@@ -535,16 +534,18 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
     with store.transaction() as c:
         p = project(c, pid, a)
         old = find(p, 'components', cid) if cid else None
-        compound = body.get('kind') == 'compound'
-        if old and (compound or old['kind'] == 'compound'):
+        compound = body.get('kind') in ('compound','planar_regions')
+        if old and (compound or old['kind'] in ('compound','planar_regions')):
             if body.get('object_hash') != store.digest(old):
                 raise HTTPException(409, '构件已变化，请刷新后再修订')
-            if not compound:
-                raise HTTPException(409, '分项构件须通过分项算量编辑器修订，避免丢失扣减明细')
+            if not compound or old['kind'] in ('compound','planar_regions') and body['kind'] != old['kind']:
+                raise HTTPException(409, '结构化构件须通过原编辑器修订，不能静默改类型或丢弃扣减明细')
         if compound:
-            from .compound_takeoff import validate
-            result, stamp = validate(p, body)
-            comp = {k: body[k] for k in ['name', 'kind', 'parameters', 'measurement_basis', 'measurement_parts', 'basis_evidence_id']}
+            result, stamp = structured_validator(body['kind'])(p, body)
+            fields = ['name', 'kind', 'parameters', 'measurement_basis', 'basis_evidence_id']
+            fields += ['measurement_parts'] if body['kind']=='compound' else ['regions','quantity_type','coordinate_basis','coordinate_evidence_id','multiplicity','multiplicity_evidence_id']
+            if body['kind']=='planar_regions' and body['quantity_type']=='volume': fields += ['thickness','thickness_unit','thickness_evidence_id']
+            comp = {k: body[k] for k in fields}
             comp.update(evidence=result['source_evidence'], source_stamp=stamp)
         else:
             result = takeoff(body.get('kind'), body.get('parameters', {}))
@@ -578,12 +579,11 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
 @app.post('/api/v1/projects/{pid}/components/preview')
 def preview_component(pid: str, body: dict, a=Depends(actor)):
     edit(a)
-    from .compound_takeoff import validate
     with store.connect() as c:
         p = project(c, pid, a)
-        if body.get('kind') != 'compound':
-            raise HTTPException(422, '此预览用于分项算量')
-        result, stamp = validate(p, body)
+        if body.get('kind') not in ('compound','planar_regions'):
+            raise HTTPException(422, '此预览用于分项或平面区域算量')
+        result, stamp = structured_validator(body['kind'])(p, body)
     return {**result, 'source_stamp': stamp}
 
 
@@ -596,9 +596,8 @@ def calculate_takeoff(pid: str, a=Depends(actor)):
             raise HTTPException(409, '当前清单已应用签证；重新生成原设计算量前需专业人员建立新的变更基线，避免把变更工程量覆盖回原设计')
         if not p['components'] or any(x['state'] != 'approved' for x in p['components']):
             raise HTTPException(409, '所有构件尺寸需先经专业复核')
-        from .compound_takeoff import validate
         for comp in p['components']:
-            if comp['kind'] == 'compound': validate(p, comp, saved=True)
+            if comp['kind'] in ('compound','planar_regions'): structured_validator(comp['kind'])(p, comp, saved=True)
         invalidate(p, 'boq')
         # Retain old calculation books; current version is the only BOQ input.
         p.setdefault('takeoff_history', []).extend(p['takeoffs'])
@@ -814,9 +813,8 @@ def apply_review(c, p, body, a, hash_verified=False):
             if any(x['component_name'] and x['component_name'] == target['component_name'] and x['parameter'] == target['parameter'] and Decimal(x['value']) != Decimal(target['value']) and x['state'] not in ('rejected','superseded') for x in p['dimension_candidates']):
                 raise HTTPException(409, '同构件同参数存在冲突值，请先拒绝不采纳候选')
         if collection == 'components':
-            if target['kind'] == 'compound':
-                from .compound_takeoff import validate
-                validate(p, target, saved=True)
+            if target['kind'] in ('compound','planar_regions'):
+                structured_validator(target['kind'])(p, target, saved=True)
             for eid in target['evidence'].values():
                 require_evidence(p, eid)
         if collection == 'takeoffs':
@@ -828,9 +826,8 @@ def apply_review(c, p, body, a, hash_verified=False):
                 comp = find(p, 'components', target['component_id'])
                 if comp['state'] != 'approved' or target['component_hash'] != store.digest(comp):
                     raise HTTPException(409, '构件已变化，请重新算量')
-                if comp['kind'] == 'compound':
-                    from .compound_takeoff import validate
-                    result, _ = validate(p, comp, saved=True)
+                if comp['kind'] in ('compound','planar_regions'):
+                    result, _ = structured_validator(comp['kind'])(p, comp, saved=True)
                     if any(target.get(k) != value for k, value in result.items()):
                         raise HTTPException(409, '计算书与构件明细不一致，请重新算量')
         if collection == 'boq':
@@ -1048,7 +1045,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.24.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.25.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')

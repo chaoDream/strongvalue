@@ -2741,3 +2741,8 @@ input::placeholder,textarea::placeholder {
 .trial-metadata dt { color: #64736c; }
 .trial-metadata dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .trial-panel td, .trial-modal td { white-space: normal; overflow-wrap: anywhere; }
+
+.planar-modal { max-width: 1100px; width: calc(100vw - 48px); }
+.planar-diagram { margin: 16px 0; border: 1px solid #dce6df; border-radius: 10px; padding: 12px; }
+.planar-diagram svg { width: 100%; max-height: 320px; display: block; }
+.planar-panel td, .planar-modal td { white-space: normal; overflow-wrap: anywhere; }

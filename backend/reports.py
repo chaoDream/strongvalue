@@ -147,8 +147,24 @@ def tables(p, q, approved):
     conversion_rows = [[t['name'], part['name']+' / '+GEOMETRIES[part['kind']]['fields'][c['parameter']].split('（')[0], c['original_value'], c['source_unit'], c['factor'],
                         c['canonical_value']+' '+c['canonical_unit'], c['rule_version'], part['evidence'][c['parameter']]]
                        for t in snapshot['takeoffs'] for part in t.get('measurement_parts', []) for c in part.get('unit_conversions', [])]
+    conversion_rows.extend([[t['name'],c['parameter'],c['original_value'],c['source_unit'],c['factor'],c['canonical_value']+' '+c['canonical_unit'],c['rule_version'],t['evidence'][c['parameter']]]
+                           for t in snapshot['takeoffs'] if t.get('planar_summary') for c in t['unit_conversions']])
     if conversion_rows:
         result.append(('算量原始单位换算', ['构件','分项 / 参数','原始值','原始单位','换算倍数','标准值 / 单位','单位规则版本','原始证据'], conversion_rows))
+    planar=[t for t in snapshot['takeoffs'] if t.get('planar_summary')]
+    if planar:
+        labels={'naive_add_area':'加项累加面积（含重叠）','add_union_area':'加项并集面积','add_overlap_area':'重叠扣重面积','naive_deduct_area':'扣减累加面积（含重叠）',
+                'deduct_union_area':'扣减并集面积','deduct_overlap_area':'重复扣减面积','net_area':'净面积','thickness':'统一厚度（m）','multiplicity':'整组重复数量','quantity_type':'计算类型'}
+        result.append(('区域并集与扣减',['构件','字段','内容'],
+                       [[t['name'],label,('不适用' if t['planar_summary'][key] is None else ('平面面积' if t['planar_summary'][key]=='area' else '等厚体积') if key=='quantity_type' else str(t['planar_summary'][key])+(' m²' if key.endswith('_area') else ''))] for t in planar for key,label in labels.items()]+
+                       [[t['name'],key,value] for t in planar for key,value in [('工程量',t['quantity']+' '+t['unit']),('设计坐标依据',t['coordinate_basis']),('计量依据',t['measurement_basis']),('算法规则',t['rule_version']),('适用边界',t['notice'])]]))
+        result.append(('平面区域与坐标',['构件','区域 / 加扣','原始坐标与尺寸','标准坐标与尺寸（m）','矩形面积（m²）','计量说明','原始依据'],
+                       [[t['name'],'R'+str(r['index'])+' / '+r['name']+' / '+('加项' if r['operation']=='add' else '扣减'),json.dumps(r['parameters'],ensure_ascii=False)+' '+r['unit'],
+                         json.dumps(r['normalized_parameters'],ensure_ascii=False),r['rectangle_area'],r['measurement_basis'],', '.join(sorted(set(r['evidence'].values())))] for t in planar for r in t['planar_regions']]))
+        result.append(('区域条带计算过程',['构件','X区间（m）','条带宽（m）','加项Y并集（m）','扣减Y并集（m）','本段净面积（m²）'],
+                       [[t['name'],s['x_from']+' → '+s['x_to'],s['width'],json.dumps(s['add_intervals']),json.dumps(s['deduct_intervals']),s['net_area']] for t in planar for s in t['planar_strips']]))
+        intersections=[[t['name'],'加项' if i['operation']=='add' else '扣减',i['left'],i['right'],i['area'],'仅定位；不可相加代替并集扣重'] for t in planar for i in t['planar_intersections']]
+        if intersections:result.append(('区域相交定位',['构件','加扣','区域A','区域B','两两相交面积（m²）','说明'],intersections))
     if not q:
         from .main import blockers
         next(table[2] for table in result if table[0] == '缺项与警示').extend([[x] for x in blockers(p)])
@@ -266,7 +282,7 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if title not in ('算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
+        if title not in ('区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
@@ -322,7 +338,7 @@ def export_report(p, q, fmt, approved, template=None, table_data=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if table_data is not None or title in ('算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
+                if table_data is not None or title in ('区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)
