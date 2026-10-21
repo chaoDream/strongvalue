@@ -4,6 +4,8 @@ import {Plus, Upload, GitCompareArrows, Split, Merge, FilePenLine, FlaskConical,
 import MembersPanel from './MembersPanel';
 import WorkflowPanel from './WorkflowPanel';
 import ReportTemplatesPanel from './ReportTemplatesPanel';
+import BoqMappingPanel from './BoqMappingPanel';
+import ResourceLibraryPanel from './ResourceLibraryPanel';
 import PdfPreview from './DocumentPreview';
 
 type Obj = Record<string, any>;
@@ -98,6 +100,8 @@ export default function EngineeringTools({section,p,user,request,refresh,onRevie
 
  return <div className="engineering-tools">
   <WorkflowPanel section={section} p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink} reviewDetails={reviewDetails}/>
+  {section==='boq'&&<BoqMappingPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/>}
+  {section==='pricing'&&<ResourceLibraryPanel p={p} user={user} request={request} refresh={refresh}/>}
   <ReportTemplatesPanel section={section} user={user} request={request} value={reportTemplateId} onChange={onReportTemplateChange}/>
   {error&&!dialog&&<div role="alert" className="error-banner">{error}<button className="icon-btn" onClick={()=>setError('')} aria-label="关闭提示"><X size={15}/></button></div>}
   {section==='boq'&&<><div className="tool-strip"><B disabled={!editable} onClick={()=>open('import')}><Upload size={15}/>导入已有清单</B><B disabled={!editable||!p.boq.length} onClick={()=>open('split',{boq_id:'',parts:[{name:'',quantity:''},{name:'',quantity:''}]})}><Split size={15}/>拆分清单</B><B disabled={!editable||p.boq.length<2} onClick={()=>open('merge',{ids:[],name:''})}><Merge size={15}/>合并清单</B><B disabled={!editable||!p.boq.some((b:Obj)=>b.state==='approved')} onClick={()=>open('change',{boq_id:'',quantity:'',evidence_id:'',reason:''})}><FilePenLine size={15}/>建立变更签证</B></div>{p.changes.length>0&&<section className="card space-bottom"><div className="section-head"><div><h2>变更与签证台账</h2><p>独立审批、保留基线，应用后重新审定清单</p></div></div><Grid headers={['清单','原工程量','变更后','增减量','状态','操作']}>{p.changes.map((c:Obj)=><tr key={c.id}><td>{c.name}</td><td>{c.before_quantity}</td><td>{c.quantity} {c.unit}</td><td>{c.delta}</td><td>{status[c.state]}{p.applied_changes.includes(c.id)?' · 已应用':''}</td><td><div className="actions"><button className="text-btn" onClick={()=>onReview('changes',c)}>复核依据</button>{!p.applied_changes.includes(c.id)&&<button className="text-btn" disabled={!editable||working||c.state!=='approved'} onClick={()=>run(()=>request(base+'/changes/'+c.id+'/apply','POST'))}>应用变更</button>}</div></td></tr>)}</Grid></section>}</>}

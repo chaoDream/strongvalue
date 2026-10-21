@@ -18,12 +18,12 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.3.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.4.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
                 '给排水': '管线平纵断面、材质及埋深', '电气': '配电系统及敷设方式', '合同计价': '合同、计量与取费依据'}
-REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes'}
+REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings'}
 
 
 def password_hash(password, salt=None):
@@ -75,7 +75,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots']:
         p.setdefault(key, [])
     return p
 
@@ -122,8 +122,10 @@ def gaps(p):
 
 def blockers(p):
     from .workflows import allocation_diagnostics
+    from .boq_mapping import mapping_issues
     out = [x['specialty']+'资料尚未复核完整' for x in gaps(p) if x['blocking']]
     out.extend(x['message'] for x in allocation_diagnostics(p)['issues'] if x['blocking'])
+    out.extend(mapping_issues(p))
     if any(x['state'] not in ('approved', 'rejected', 'superseded') for x in p['facts']):
         out.append('存在未审核或冲突的工程事实')
     if any(x['state'] == 'conflict' for x in p.get('dimension_candidates', [])):
@@ -152,6 +154,7 @@ def blockers(p):
 
 
 def price_blockers(p):
+    from .resource_library import reference_errors
     out = []
     tax_modes = set()
     for item in p['boq']:
@@ -186,6 +189,7 @@ def price_blockers(p):
                     out.append('定额/资源价格缺少当前原始证据')
     if len(tax_modes) > 1:
         out.append('资源含税与不含税价格混用；请按计价规则统一口径')
+    out.extend(reference_errors(p))
     return out
 
 
@@ -544,6 +548,8 @@ def update_boq(pid: str, bid: str, body: dict, a=Depends(actor)):
     with store.transaction() as c:
         p = project(c, pid, a)
         b = find(p, 'boq', bid)
+        if b.get('mapping_ref') and 'code' in body and body['code'] != b['code']:
+            raise HTTPException(409, '此编码来自已审映射；更换编码请修订并采用新的有据映射')
         if 'quotas' in body:
             if not isinstance(body['quotas'], list):
                 raise HTTPException(422, '定额须为数组')
@@ -665,6 +671,19 @@ def apply_review(c, p, body, a, hash_verified=False):
                 raise HTTPException(409, '请补充有依据的清单编码和项目特征')
             from .extensions import validate_links
             validate_links(p, target)
+            from .boq_mapping import mapping_issues
+            issues = mapping_issues({**p, 'boq': [target]})
+            if issues:
+                raise HTTPException(409, '；'.join(issues))
+        if collection == 'boq_mappings':
+            from .boq_mapping import validate_mapping, invalidate_dependents
+            validate_mapping(p, target)
+            obsolete = [r for r in p['boq_mappings'] if r['family'] == target['family'] and r['version'] < target['version'] and r['state'] == 'approved']
+            if any(r['family'] == target['family'] and r['version'] > target['version'] and r['state'] == 'approved' for r in p['boq_mappings']):
+                raise HTTPException(409, '此规则已有已审新版本，不能重新启用旧版本')
+            for rule in obsolete:
+                rule['state'] = 'superseded'
+            invalidate_dependents(p, {r['id'] for r in obsolete})
         if collection == 'rules':
             require_evidence(p, target['evidence_id'])
             if target['region'] != p['region'] or not date.fromisoformat(target['valid_from']) <= effective_date(p) <= date.fromisoformat(target['valid_until']):
@@ -702,11 +721,14 @@ def apply_review(c, p, body, a, hash_verified=False):
                     b['state'] = 'stale'
                     find(p, 'takeoffs', b['takeoff_id'])['state'] = 'stale'
         if not approve:
+            if collection == 'boq_mappings':
+                from .boq_mapping import invalidate_dependents
+                invalidate_dependents(p, {target['id']})
             if collection == 'price_changes':
                 for b in p['boq']:
                     if any(r.get('price_change_id') == target['id'] for q in b['quotas'] for r in q['resources']):
                         b['state'] = 'stale'
-            if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes'):
+            if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings'):
                 invalidate(p, 'quotes')
             else:
                 invalidate(p, collection)
@@ -753,6 +775,8 @@ def quote(pid: str, a=Depends(actor)):
                     'pricing_date': effective_date(p).isoformat(), 'changes': p['changes'], 'applied_changes': p['applied_changes'],
                     'reconciliations': p['reconciliations'], 'require_golden_baseline': p.get('require_golden_baseline', False)}
         snapshot.update(price_changes=p['price_changes'], applied_price_changes=p['applied_price_changes'])
+        snapshot.update(boq_mappings=p['boq_mappings'], boq_standard=p.get('boq_standard',''), boq_edition=p.get('boq_edition',''))
+        snapshot['library_snapshots']=p['library_snapshots']
         result = calculate(p['boq'], ruleset)
         q = {'id': store.uid(), 'version': len(p['quotes'])+1, 'created_at': store.now(), 'state': 'draft',
              'input_hash': store.digest(snapshot), 'snapshot': json.loads(store.canonical(snapshot)), **result,
@@ -786,7 +810,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.3.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.4.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
@@ -862,6 +886,10 @@ from .workflows import router as workflow_router
 app.include_router(workflow_router)
 from .templates import router as template_router
 app.include_router(template_router)
+from .boq_mapping import router as boq_mapping_router
+app.include_router(boq_mapping_router)
+from .resource_library import router as resource_library_router
+app.include_router(resource_library_router)
 
 dist = Path(__file__).parent.parent/'frontend'/'dist'
 if dist.exists():

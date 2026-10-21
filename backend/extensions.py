@@ -104,6 +104,10 @@ def project_settings(pid: str, body: dict, a=Depends(core.actor)):
             except (ValueError, TypeError):
                 raise HTTPException(422, '计价适用日期须为 YYYY-MM-DD')
             p['pricing_date'] = body['pricing_date']
+        if 'boq_standard' in body or 'boq_edition' in body:
+            if any(not isinstance(body.get(k),str) or not body[k].strip() or len(body[k])>200 for k in ['boq_standard','boq_edition']):
+                raise HTTPException(422, '请同时填写有依据的清单标准及版本')
+            p.update(boq_standard=body['boq_standard'].strip(),boq_edition=body['boq_edition'].strip())
         if 'scope' in body:
             if not body['scope'] or any(s not in core.REQUIREMENTS for s in body['scope']):
                 raise HTTPException(422, '专业范围无效')

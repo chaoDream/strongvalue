@@ -138,11 +138,14 @@ def validate_price_change(p, change):
             raise HTTPException(409, '调价基线已变化，请重新建立调价单')
         validate_price_metadata(p, entry['after'])
         number(entry['after']['price'])
+    from .resource_library import reference_errors
+    proposed = {'id':'proposed','code':'','name':'调价资源','quotas':[{'code':'proposed','resources':[e['after'] for e in change['entries']]}]}
+    issues = reference_errors({**p,'boq':[proposed]})
+    if issues:
+        raise HTTPException(409,'；'.join(issues))
 
 
-@router.post('/projects/{pid}/price-changes')
-def propose_price_change(pid: str, body: dict, a=Depends(core.actor)):
-    core.edit(a)
+def build_price_change(p, body):
     items, reason = body.get('entries'), body.get('reason')
     if not isinstance(items, list) or not 1 <= len(items) <= 500 or not isinstance(reason, str) or not reason.strip() or len(reason) > 3000:
         raise HTTPException(422, '调价须选择1至500条资源并填写调价及合同依据')
@@ -151,42 +154,49 @@ def propose_price_change(pid: str, body: dict, a=Depends(core.actor)):
     metadata = body.get('metadata')
     if not isinstance(metadata, dict):
         raise HTTPException(422, '调价来源信息不完整')
+    validate_price_metadata(p, metadata)
+    lookup = {r['key']: r for r in resources(p)}
+    entries = []
+    for item in items:
+        row = lookup.get(item['key'])
+        if not row or row['boq_hash'] != item.get('boq_hash') or row['resource_hash'] != item.get('resource_hash'):
+            raise HTTPException(409, '资源已变化，请重新读取后核对调价')
+        after = {**row['resource'], **{k: metadata[k] for k in ['source', 'license', 'period', 'region', 'tax_mode', 'valid_from', 'valid_until', 'evidence_id', 'source_type']},
+                 'price': str(number(item.get('price')))}
+        after.pop('price_change_id', None)
+        after.pop('library_ref', None)
+        entries.append({**{k: row[k] for k in ['key', 'boq_id', 'boq_name', 'quota_index', 'resource_index', 'boq_hash', 'resource_hash']},
+                        'before': copy.deepcopy(row['resource']), 'after': after})
+    ids = {e['boq_id'] for e in entries}
+    before = [copy.deepcopy(b) for b in p['boq'] if b['id'] in ids]
+    after_boq = copy.deepcopy(before)
+    for entry in entries:
+        b = next(x for x in after_boq if x['id'] == entry['boq_id'])
+        b['quotas'][entry['quota_index']]['resources'][entry['resource_index']] = entry['after']
+    rules = p['rules'][0] if p['rules'] else {'fees': []}
+    previous, updated = calculate(before, {**rules, 'fees': []}), calculate(after_boq, {**rules, 'fees': []})
+    with localcontext() as ctx:
+        ctx.prec = 80
+        delta = money(Decimal(updated['subtotal'])-Decimal(previous['subtotal']))
+    change = {'id': store.uid(), 'name': str(body.get('name') or '资源价格变更')[:100], 'reason': reason,
+              'entries': entries, 'state': 'draft', 'created_at': store.now(), 'evidence_id': metadata['evidence_id'],
+              'impact': {'before_subtotal': previous['subtotal'], 'after_subtotal': updated['subtotal'], 'delta': delta,
+                         'boq_count': len(ids), 'resource_count': len(entries), 'rules_hash': store.digest(rules),
+                         'notice': '仅为受影响清单分部分项金额试算，不含措施、费用及税金；应用后须重新审定并计算报价。'}}
+    p['price_changes'].append(change)
+    core.invalidate(p, 'quotes')
+    return change
+
+
+@router.post('/projects/{pid}/price-changes')
+def propose_price_change(pid: str, body: dict, a=Depends(core.actor)):
+    core.edit(a)
     with store.transaction() as c:
         p = core.project(c, pid, a)
-        validate_price_metadata(p, metadata)
-        lookup = {r['key']: r for r in resources(p)}
-        entries = []
-        for item in items:
-            row = lookup.get(item['key'])
-            if not row or row['boq_hash'] != item.get('boq_hash') or row['resource_hash'] != item.get('resource_hash'):
-                raise HTTPException(409, '资源已变化，请重新读取后核对调价')
-            after = {**row['resource'], **{k: metadata[k] for k in ['source', 'license', 'period', 'region', 'tax_mode', 'valid_from', 'valid_until', 'evidence_id', 'source_type']},
-                     'price': str(number(item.get('price')))}
-            after.pop('price_change_id', None)
-            entries.append({**{k: row[k] for k in ['key', 'boq_id', 'boq_name', 'quota_index', 'resource_index', 'boq_hash', 'resource_hash']},
-                            'before': copy.deepcopy(row['resource']), 'after': after})
-        ids = {e['boq_id'] for e in entries}
-        before = [copy.deepcopy(b) for b in p['boq'] if b['id'] in ids]
-        after_boq = copy.deepcopy(before)
-        for entry in entries:
-            b = next(x for x in after_boq if x['id'] == entry['boq_id'])
-            b['quotas'][entry['quota_index']]['resources'][entry['resource_index']] = entry['after']
-        rules = p['rules'][0] if p['rules'] else {'fees': []}
-        previous, updated = calculate(before, {**rules, 'fees': []}), calculate(after_boq, {**rules, 'fees': []})
-        with localcontext() as ctx:
-            ctx.prec = 80
-            delta = money(Decimal(updated['subtotal'])-Decimal(previous['subtotal']))
-        change = {'id': store.uid(), 'name': str(body.get('name') or '资源价格变更')[:100], 'reason': reason,
-                  'entries': entries, 'state': 'draft', 'created_at': store.now(), 'evidence_id': metadata['evidence_id'],
-                  'impact': {'before_subtotal': previous['subtotal'], 'after_subtotal': updated['subtotal'], 'delta': delta,
-                             'boq_count': len(ids), 'resource_count': len(entries), 'rules_hash': store.digest(rules),
-                             'notice': '仅为受影响清单分部分项金额试算，不含措施、费用及税金；应用后须重新审定并计算报价。'}}
-        p['price_changes'].append(change)
-        core.invalidate(p, 'quotes')
+        change = build_price_change(p, body)
         store.audit(c, p, a, 'PRICE_CHANGE_PROPOSED', change)
         store.save(c, p)
     return change
-
 
 @router.post('/projects/{pid}/price-changes/{cid}/apply')
 def apply_price_change(pid: str, cid: str, a=Depends(core.actor)):

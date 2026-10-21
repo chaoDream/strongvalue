@@ -131,6 +131,22 @@ def tables(p, q, approved):
                        [[entry['boq_name'], entry['after']['name'], entry['before']['price'], entry['after']['price'], entry['after']['unit'],
                          entry['after']['period']+' / '+entry['after']['tax_mode'], entry['after']['source']+' / '+entry['after']['license'],
                          change['reason'], entry['after']['evidence_id']] for change in price_changes for entry in change['entries']]))
+    mapped = [b for b in items if b.get('mapping_ref')]
+    if mapped:
+        result.append(('清单编码映射依据', ['清单编码','名称','标准','版本','专业','映射版本校验值','来源证据'],
+                       [[b['code'],b['name'],b['code_standard'],b['code_edition'],b['discipline'],b['mapping_ref']['hash'],b['code_evidence_id']] for b in mapped]))
+    library_rows = []
+    for b in items:
+        for quota in b.get('quotas',[]):
+            for resource in quota['resources']:
+                ref=resource.get('library_ref')
+                if not ref: continue
+                saved=next((s['entry'] for s in snapshot.get('library_snapshots',[]) if s['hash']==ref['hash']),None)
+                if saved:
+                    library_rows.append([b['name'],resource['name'],resource['price'],saved['source_project_name'],
+                                         saved['reuse_basis'],saved['resource']['period'],ref['hash'],resource['evidence_id'],ref['reuse_evidence_id']])
+    if library_rows:
+        result.append(('企业价格复用依据',['清单','资源','采用单价','原项目','复用授权范围','期次','企业条目校验值','价格依据','复用许可依据'],library_rows))
     return watermark, result
 
 
