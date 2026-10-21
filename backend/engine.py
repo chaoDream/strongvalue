@@ -174,6 +174,28 @@ def takeoff(kind, params):
             'formula': formula, 'rule_version': 'geometry-1.0' if kind in ('slab', 'walls', 'pipe') else 'geometry-2.0', 'parameters': params}
 
 
+def quota_conversion(quota):
+    """Optional, explicit consumption conversion; never infer units or official factors."""
+    if 'conversion' not in quota:
+        return None
+    c = quota['conversion']
+    required = {'quota_unit', 'unit_factor', 'category_factors', 'source', 'license', 'reason', 'evidence_id'}
+    if not isinstance(c, dict) or set(c) != required:
+        raise DomainError('定额换算字段不完整或包含未知字段')
+    for key in ['quota_unit', 'source', 'license', 'reason', 'evidence_id']:
+        if not isinstance(c[key], str) or not c[key].strip() or len(c[key]) > 2000:
+            raise DomainError('定额换算须填写单位、来源、授权、换算说明及证据（最多2000字）')
+    number(c['unit_factor'], True)
+    factors = c['category_factors']
+    if not isinstance(factors, dict) or set(factors) != {'人工', '材料', '机械', '设备'}:
+        raise DomainError('须明确人工、材料、机械、设备四类换算系数')
+    for value in factors.values():
+        number(value, True)
+    if any(r.get('type') not in factors for r in quota['resources']):
+        raise DomainError('换算资源类别须为人工、材料、机械或设备')
+    return c
+
+
 @precise
 def calculate(items, rules):
     """Round unit price, line total, then each fee. Rate basis is explicit."""
@@ -189,10 +211,18 @@ def calculate(items, rules):
         direct = Decimal(0)
         for quota in item['quotas']:
             coefficient = number(quota.get('coefficient', '1'), True)
+            conversion = quota_conversion(quota)
             for r in quota['resources']:
-                cost = number(r['consumption']) * number(r['price']) * coefficient
+                unit_factor = number(conversion['unit_factor'], True) if conversion else Decimal(1)
+                category_factor = number(conversion['category_factors'][r['type']], True) if conversion else Decimal(1)
+                effective_coefficient = coefficient * unit_factor * category_factor
+                effective_consumption = number(r['consumption']) * effective_coefficient
+                cost = effective_consumption * number(r['price'])
                 direct += cost
-                resources.append({**r, 'quota_code': quota['code'], 'coefficient': str(coefficient), 'cost': str(cost)})
+                resources.append({**r, 'quota_code': quota['code'], 'coefficient': str(effective_coefficient), 'cost': str(cost),
+                                  **({'quota_coefficient': str(coefficient), 'unit_factor': str(unit_factor),
+                                      'category_factor': str(category_factor), 'effective_consumption': str(effective_consumption),
+                                      'quota_unit': conversion['quota_unit'], 'conversion': dict(conversion)} if conversion else {})})
                 category = {'人工': 'labor', '材料': 'material', '机械': 'machinery', '设备': 'equipment'}.get(r.get('type'))
                 if category:
                     categories[category] += cost*quantity_number(item['quantity'])
@@ -220,5 +250,5 @@ def calculate(items, rules):
         fee_ids.add(key)
         context['fee:'+key] = amount
     return {'lines': lines, 'subtotal': money(subtotal), 'fees': fees, 'total': money(running),
-            'rounding': f'{rounding_mode}; unit_price={digits}, line_total=2, fee=2', 'engine': 'pricing-2.0',
+            'rounding': f'{rounding_mode}; unit_price={digits}, line_total=2, fee=2', 'engine': 'pricing-2.1' if any('conversion' in q for b in items for q in b['quotas']) else 'pricing-2.0',
             'resource_bases': {k: str(v) for k, v in categories.items()}}

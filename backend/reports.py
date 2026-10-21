@@ -117,6 +117,13 @@ def tables(p, q, approved):
                [[t['name'], t['formula'], json.dumps(t['parameters'], ensure_ascii=False), t['measurement_basis'], t['unit'], t['quantity'], ', '.join(t['evidence'].values())] for t in snapshot['takeoffs']]),
               ('综合单价分析', ['清单项', '定额', '资源', '类型', '消耗', '换算系数', '资源价格', '单价贡献'],
                [[b['name'], r['quota_code'], r['name'], r.get('type', ''), r['consumption'], r['coefficient'], r['price'], r['cost']] for b in items for r in b.get('resources_snapshot', [])]),
+              ('定额换算明细', ['清单项', '定额', '字段', '值'],
+               [[b['name'], quota['code'], label, str(value)[start:start+140]]
+                for b in items for quota in b.get('quotas', []) for conv in ([quota['conversion']] if 'conversion' in quota else [])
+                for label, value in [('定额单位', conv['quota_unit']), ('单位换算率', conv['unit_factor']), ('通用系数', quota.get('coefficient', '1')),
+                                     *[(k+'系数', conv['category_factors'][k]) for k in ['人工', '材料', '机械', '设备']],
+                                     ('换算来源', conv['source']), ('授权依据', conv['license']), ('原始证据', conv['evidence_id']), ('换算说明', conv['reason'])]
+                for start in range(0, max(1,len(str(value))), 140)]),
               ('费用与税金', ['费用', '基数', '费率', '金额', '依据'],
                [[f['name'], f['base_amount'], f['rate'], f['amount'], f.get('source', '')] for f in (q['fees'] if q else [])]),
               ('资源价格表', ['资源', '类型', '单价', '地区', '期次', '税制', '有效期', '价格来源 / 授权'],
@@ -186,6 +193,7 @@ def tables(p, q, approved):
                 if part: segment[0] = cells[0]+'（续'+str(part+1)+'）'
                 expanded.append(segment)
         result[i] = (title,headers,expanded)
+    result = [section for section in result if section[0] != '定额换算明细' or section[2]]
     return watermark, result
 
 

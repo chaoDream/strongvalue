@@ -18,7 +18,7 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.13.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.14.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -181,6 +181,12 @@ def price_blockers(p):
         for q in item.get('quotas', []):
             if not q.get('license') or not q.get('edition') or not q.get('source') or not q.get('resources'):
                 out.append(item['name']+'缺少定额版本、授权、来源或消耗')
+            if 'conversion' in q:
+                from .engine import quota_conversion
+                try:
+                    quota_conversion(q)
+                except (DomainError, KeyError, TypeError) as error:
+                    out.append('定额换算无效：'+str(error))
             for r in q.get('resources', []):
                 if r.get('price_change_id'):
                     change = next((x for x in p.get('price_changes', []) if x['id'] == r['price_change_id']), None)
@@ -201,7 +207,7 @@ def price_blockers(p):
                 except ValueError:
                     out.append('价格有效期格式无效')
             # Every reference must still point to a current original document.
-            for priced in [q]+q.get('resources', []):
+            for priced in [q]+q.get('resources', [])+([q['conversion']] if isinstance(q.get('conversion'), dict) else []):
                 e = next((e for e in p['evidence'] if e['id'] == priced.get('evidence_id')), None)
                 if not e or next((d for d in p['documents'] if d['id'] == e['document_id']), {}).get('superseded'):
                     out.append('定额/资源价格缺少当前原始证据')
@@ -588,6 +594,8 @@ def update_boq(pid: str, bid: str, body: dict, a=Depends(actor)):
                 calculate([{**b, 'quotas': body['quotas']}], {'fees': []})
                 for q in body['quotas']:
                     require_evidence(p, q.get('evidence_id'))
+                    if 'conversion' in q:
+                        require_evidence(p, q['conversion']['evidence_id'])
                     for resource in q['resources']:
                         require_evidence(p, resource.get('evidence_id'))
             except (KeyError, TypeError) as e:
@@ -721,6 +729,11 @@ def apply_review(c, p, body, a, hash_verified=False):
         if collection == 'boq':
             if not target.get('code') or not target.get('features'):
                 raise HTTPException(409, '请补充有依据的清单编码和项目特征')
+            from .engine import quota_conversion
+            for quota in target.get('quotas', []):
+                if 'conversion' in quota:
+                    quota_conversion(quota)
+                    require_evidence(p, quota['conversion']['evidence_id'])
             from .extensions import validate_links
             validate_links(p, target)
             from .boq_mapping import mapping_issues
@@ -881,7 +894,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.13.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.14.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')

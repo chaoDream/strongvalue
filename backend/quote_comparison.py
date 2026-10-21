@@ -34,7 +34,7 @@ def validate_quote(q):
 
 def resource_changes(before,after):
     def flatten(b):
-        return {(qi,ri):{'quota_code':q['code'],'coefficient':q.get('coefficient','1'),**r}
+        return {(qi,ri):{'quota_code':q['code'],'coefficient':q.get('coefficient','1'),**({'conversion':q['conversion']} if 'conversion' in q else {}),**r}
                 for qi,q in enumerate((b or {}).get('quotas',[])) for ri,r in enumerate(q.get('resources',[]))}
     old,new = flatten(before),flatten(after)
     rows=[]
