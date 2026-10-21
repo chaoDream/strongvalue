@@ -41,8 +41,9 @@ def calculate(comp):
     rows, dimensions, refs, additions, deductions = [], {}, {}, [], []
     gross, deducted, unit = Decimal(0), Decimal(0), None
     names = set()
+    has_conversions = False
     for i, part in enumerate(parts):
-        if not isinstance(part, dict) or set(part) != {'name', 'operation', 'kind', 'parameters', 'multiplicity', 'evidence', 'measurement_basis'}:
+        if not isinstance(part, dict) or set(part) not in ({'name', 'operation', 'kind', 'parameters', 'multiplicity', 'evidence', 'measurement_basis'}, {'name', 'operation', 'kind', 'parameters', 'multiplicity', 'evidence', 'measurement_basis', 'parameter_units'}):
             raise DomainError('分项字段不完整或包含未知字段')
         name = text(part['name'], '分项名称', 200)
         if name in names: raise DomainError('分项名称不能重复')
@@ -61,7 +62,12 @@ def calculate(comp):
         count = number(part['multiplicity'], True)
         if count != count.to_integral_value() or count > 1000000:
             raise DomainError('重复数量须为1至1000000之间的整数')
-        result = takeoff(kind, {**part['parameters'], 'deduction': '0'})
+        normalized, conversions = part['parameters'], []
+        if 'parameter_units' in part:
+            from .measurement_units import normalize
+            normalized, conversions = normalize(kind, part['parameters'], part['parameter_units'])
+            has_conversions = True
+        result = takeoff(kind, {**normalized, 'deduction': '0'})
         if unit is not None and unit != result['unit']:
             raise DomainError('同一构件各分项须使用相同计量单位，不能将面积直接扣成体积')
         unit = result['unit']
@@ -70,7 +76,11 @@ def calculate(comp):
         dimensions.update({prefix+k: str(v) for k, v in part['parameters'].items()})
         dimensions[prefix+'multiplicity'] = str(count)
         refs.update({prefix+k: eid for k, eid in evidence.items()})
-        ast = op('multiply', geometry_ast(kind, prefix), {'dimension': prefix+'multiplicity'})
+        geometry = geometry_ast(kind, prefix)
+        if conversions:
+            from .measurement_units import converted_ast
+            geometry = converted_ast(geometry, conversions, prefix)
+        ast = op('multiply', geometry, {'dimension': prefix+'multiplicity'})
         if part['operation'] == 'add':
             gross += amount
             additions.append(ast)
@@ -79,7 +89,8 @@ def calculate(comp):
             deductions.append(ast)
         rows.append({**part, 'index': i+1, 'unit': unit, 'single_quantity': result['quantity'],
                      'quantity': str(amount), 'formula': '('+result['formula'].removesuffix(' − deduction')+') × '+str(count),
-                     'formula_ast': ast, 'geometry_rule_version': result['rule_version']})
+                     'formula_ast': ast, 'geometry_rule_version': result['rule_version'],
+                     **({'normalized_parameters':normalized, 'unit_conversions':conversions} if conversions else {})})
     if not additions or deducted > gross:
         raise DomainError('至少需要一个加项，扣减合计不能超过加项合计')
     quantity_number(gross)
@@ -89,7 +100,7 @@ def calculate(comp):
             'formula': '加项合计 '+str(gross)+' − 扣减合计 '+str(deducted), 'parameters': {},
             'formula_ast': op('subtract', op('add', *additions), op('add', *deductions)),
             'dimensions': dimensions, 'measurement_parts': rows, 'source_evidence': refs,
-            'rounding_rule': 'Decimal 80位计算精度；不对分项或净量另行修约', 'rule_version': VERSION}
+            'rounding_rule': 'Decimal 80位计算精度；不对分项或净量另行修约', 'rule_version': 'compound-geometry-1.1' if has_conversions else VERSION}
 
 
 def validate(p, comp, saved=False):

@@ -86,6 +86,12 @@ def validate_links(p, b):
                 raise HTTPException(409, '同一来源工程量被重复计入清单')
 
 
+@router.get('/takeoff-unit-types')
+def takeoff_unit_types(a=Depends(core.actor)):
+    from .measurement_units import profiles
+    return profiles()
+
+
 @router.get('/takeoff-types')
 def takeoff_types(a=Depends(core.actor)):
     return GEOMETRIES
