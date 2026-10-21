@@ -13,7 +13,7 @@ router = APIRouter(prefix='/api/v1')
 
 
 def context_hash(p):
-    return store.digest({'boq':p['boq'], 'rules':p['rules'], 'date':core.effective_date(p).isoformat()})
+    return store.digest({'boq':p['boq'], 'rules':p['rules'], 'date':core.effective_date(p).isoformat(),'engineering_structures':p['engineering_structures']})
 
 
 def text(body, key, limit=3000):
@@ -33,17 +33,19 @@ def evidence(p, eid):
 
 def impact(p, changes):
     from .pricing_basis import issues
+    from .scoped_rules import issues as scoped_issues
+    from .engineering_structure import latest, issues as structure_issues
     rule = p['rules'][0] if p['rules'] else None
-    if not rule or rule['state']!='approved' or any(b['state']!='approved' for b in p['boq']) or core.price_blockers(p) or issues(p):
+    if not rule or rule['state']!='approved' or any(b['state']!='approved' for b in p['boq']) or core.price_blockers(p) or issues(p) or scoped_issues(p) or structure_issues(p):
         return {'available':False, 'notice':'当前没有完整审定的组价与规则，仅记录数量变化，不推算金额'}
     if rule['region']!=p['region'] or not date.fromisoformat(rule['valid_from'])<=core.effective_date(p)<=date.fromisoformat(rule['valid_until']):
         return {'available':False, 'notice':'规则地区或有效期不适用，未推算金额'}
     try:
-        before = calculate(p['boq'], rule)
+        before = calculate(p['boq'], rule, latest(p))
         items = copy.deepcopy(p['boq'])
         for change in changes:
             next(b for b in items if b['id']==change['boq_id'])['quantity']=change['quantity']
-        after = calculate(items, rule)
+        after = calculate(items, rule, latest(p))
         return {'available':True, 'before_total':before['total'], 'after_total':after['total'],
                 'delta':money(Decimal(after['total'])-Decimal(before['total'])),
                 'rules_snapshot':copy.deepcopy(rule), 'pricing_date':core.effective_date(p).isoformat(),

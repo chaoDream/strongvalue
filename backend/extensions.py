@@ -323,7 +323,7 @@ def scenario(pid: str, body: dict, a=Depends(core.actor)):
                 for r in quota['resources']:
                     key = {'材料': 'material_factor', '人工': 'labor_factor', '机械': 'machinery_factor'}.get(r.get('type'))
                     if key: r['price'] = str(number(r['price'])*factors[key])
-        result = calculate(items, q['snapshot']['rules'][0])
+        result = calculate(items, q['snapshot']['rules'][0], q['snapshot'].get('engineering_structures', [])[-1] if q['snapshot'].get('engineering_structures') else None)
         record = {'id': store.uid(), 'name': str(body.get('name') or '内部敏感性测算'), 'quote_id': q['id'], 'base_version': q['version'],
                   'base_total': q['total'], 'total': result['total'], 'delta': money(Decimal(result['total'])-Decimal(q['total'])),
                   'factors': {k: str(v) for k, v in factors.items()}, 'result': result, 'created_at': store.now(),

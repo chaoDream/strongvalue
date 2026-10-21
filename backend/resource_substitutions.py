@@ -30,7 +30,7 @@ def evidence(p, eid):
 
 
 def context(p):
-    return store.digest({'boq':p['boq'],'rules':p['rules'],'date':core.effective_date(p).isoformat(),'pricing_bases':p['pricing_bases'],'region':p['region']})
+    return store.digest({'boq':p['boq'],'rules':p['rules'],'date':core.effective_date(p).isoformat(),'pricing_bases':p['pricing_bases'],'region':p['region'],'engineering_structures':p['engineering_structures']})
 
 
 def replacement_resources(p, values):
@@ -57,17 +57,19 @@ def changed_items(p, row, after):
 
 def impact(p, row, after):
     from .pricing_basis import issues
+    from .scoped_rules import issues as scoped_issues
+    from .engineering_structure import latest, issues as structure_issues
     rules=p['rules'][0] if p['rules'] else None
     proposed={**p,'boq':changed_items(p,row,after)}
     unavailable={'available':False,'notice':'当前材料缺价、规则或组价尚未完整审定；仅记录替换，不推算差额。'}
-    if not rules or rules['state']!='approved' or any(b['state']!='approved' for b in p['boq']) or core.price_blockers(p) or core.price_blockers(proposed) or issues(p):
+    if not rules or rules['state']!='approved' or any(b['state']!='approved' for b in p['boq']) or core.price_blockers(p) or core.price_blockers(proposed) or issues(p) or scoped_issues(p) or structure_issues(p):
         return unavailable
     if rules['region']!=p['region'] or not date.fromisoformat(rules['valid_from'])<=core.effective_date(p)<=date.fromisoformat(rules['valid_until']):
         return unavailable
     try:
         with localcontext() as ctx:
             ctx.prec=80
-            before=calculate(p['boq'],rules);updated=calculate(proposed['boq'],rules)
+            before=calculate(p['boq'],rules,latest(p));updated=calculate(proposed['boq'],rules,latest(p))
             return {'available':True,'before_total':before['total'],'after_total':updated['total'],
                     'delta':money(Decimal(updated['total'])-Decimal(before['total'])),
                     'rules_snapshot':copy.deepcopy(rules),'pricing_date':core.effective_date(p).isoformat(),

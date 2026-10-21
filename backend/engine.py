@@ -94,7 +94,17 @@ def expression(expr, context, depth=0):
 
 def validate_rules(rules):
     rounding_config(rules)
-    known = {'subtotal', 'running', 'labor', 'material', 'machinery', 'equipment'}
+    groups = rules.get('node_fees', [])
+    if not isinstance(groups, list) or len(groups)>200 or any(not isinstance(g,dict) or set(g)!={'node_id','fees'} or not isinstance(g['node_id'],str) or not g['node_id'] or not isinstance(g['fees'],list) or not 1<=len(g['fees'])<=50 for g in groups):
+        raise DomainError('分级费用须按工程节点分组，每组1至50项，最多200组')
+    if len({g['node_id'] for g in groups})!=len(groups) or sum(len(g['fees']) for g in groups)>500:
+        raise DomainError('工程节点分组不能重复，分级费用合计最多500项')
+    for group in groups:
+        for fee in group['fees']:
+            if not isinstance(fee,dict) or not all(k in fee for k in ['basis','rate']) or any(not isinstance(fee.get(k),str) or not fee[k].strip() or len(fee[k])>2000 for k in ['name','source','evidence_id']):
+                raise DomainError('分级费用须有名称、取费依据和原始证据')
+        validate_rules({'fees':group['fees']})
+    known = {'subtotal', 'running', 'labor', 'material', 'machinery', 'equipment', 'children_total', 'lower_fees'}
     fee_ids = set()
     def validate(expr, depth=0, budget=None):
         budget = budget if budget is not None else [100]
@@ -232,10 +242,32 @@ def quota_conversion(quota):
     return c
 
 
+def calculate_fees(fees, context, rounding_mode):
+    """Ordered fees in one scope. References never leak to another scope."""
+    context=dict(context);result=[];fee_ids=set()
+    for fee in fees:
+        basis=expression(fee['basis'],context)
+        if basis<0:raise DomainError('费用计算基数不得为负数')
+        rate=number(fee['rate'])
+        if rate>1:raise DomainError('费率使用小数，范围为0到1')
+        value=basis*rate
+        if not value.is_finite() or value.adjusted()>18:raise DomainError('金额超出范围')
+        amount=value.quantize(Decimal('.01'),rounding=rounding_mode)
+        result.append({**fee,'base_amount':money(basis),'amount':money(amount)})
+        context['running']+=amount
+        key=str(fee.get('key',fee['name']))
+        if key in fee_ids:raise DomainError('费用名称/标识重复')
+        fee_ids.add(key);context['fee:'+key]=amount
+    return result,context['running']
+
+
 @precise
-def calculate(items, rules):
+def calculate(items, rules, structure=None):
     """Round unit price, line total, then each fee. Rate basis is explicit."""
     validate_rules(rules)
+    if rules.get('node_fees'):
+        from .scoped_pricing import calculate_scoped
+        return calculate_scoped(items, rules, structure)
     digits, rounding_mode = rounding_config(rules)
     def rounded(value, precision=2):
         if not value.is_finite() or value.adjusted() > 18:
@@ -268,25 +300,7 @@ def calculate(items, rules):
         total = rounded(unit * quantity_number(item['quantity']))
         lines.append({**item, 'resources_snapshot': resources, 'unit_price': str(unit), 'amount': str(total)})
     subtotal = sum((Decimal(x['amount']) for x in lines), Decimal(0))
-    running, fees = subtotal, []
-    context = {**categories, 'subtotal': subtotal, 'running': running}
-    fee_ids = set()
-    for fee in rules.get('fees', []):
-        basis = expression(fee['basis'], context)
-        if basis < 0:
-            raise DomainError('费用计算基数不得为负数')
-        rate = number(fee['rate'])
-        if rate > 1:
-            raise DomainError('费率使用小数，范围为 0 到 1')
-        amount = rounded(basis * rate)
-        fees.append({**fee, 'base_amount': money(basis), 'amount': money(amount)})
-        running += amount
-        context['running'] = running
-        key = str(fee.get('key', fee['name']))
-        if key in fee_ids:
-            raise DomainError('费用名称/标识重复')
-        fee_ids.add(key)
-        context['fee:'+key] = amount
+    fees, running = calculate_fees(rules.get('fees', []), {**categories, 'subtotal':subtotal, 'running':subtotal, 'children_total':subtotal, 'lower_fees':Decimal(0)}, rounding_mode)
     return {'lines': lines, 'subtotal': money(subtotal), 'fees': fees, 'total': money(running),
             'rounding': f'{rounding_mode}; unit_price={digits}, line_total=2, fee=2', 'engine': 'pricing-2.1' if any('conversion' in q for b in items for q in b['quotas']) else 'pricing-2.0',
             'resource_bases': {k: str(v) for k, v in categories.items()}}

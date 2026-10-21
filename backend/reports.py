@@ -125,7 +125,7 @@ def tables(p, q, approved):
                                      ('换算来源', conv['source']), ('授权依据', conv['license']), ('原始证据', conv['evidence_id']), ('换算说明', conv['reason'])]
                 for start in range(0, max(1,len(str(value))), 140)]),
               ('费用与税金', ['费用', '基数', '费率', '金额', '依据'],
-               [[f['name'], f['base_amount'], f['rate'], f['amount'], f.get('source', '')] for f in (q['fees'] if q else [])]),
+               [[(f.get('scope_name','')+' / ' if f.get('scope_name') else '')+f['name'], f['base_amount'], f['rate'], f['amount'], f.get('source', '')] for f in (q['fees'] if q else [])]),
               ('资源价格表', ['资源', '类型', '单价', '地区', '期次', '税制', '有效期', '价格来源 / 授权'],
                [[r['name'], r.get('type', ''), '待询价' if r.get('pricing_status')=='unpriced' else r['price'], r.get('region',''), r.get('period',''), r.get('tax_mode',''), r.get('valid_until',''), '尚无价格依据' if r.get('pricing_status')=='unpriced' else r['source']+' / '+r['license']] for b in items for quota in b.get('quotas', []) for r in quota['resources']]),
               ('依据与证据', ['证据 ID', '文件', '文件哈希', '页码', '提取方式', '原文 / 标注', '坐标约定', '归一化区域', '页面旋转及裁切'],
@@ -170,7 +170,7 @@ def tables(p, q, approved):
         nodes = {n['id']: n for n in structure['nodes']}
         summary.extend([['工程结构版本', 'V'+str(structure['version'])+' / '+structure['state']],
                         *[['工程划分与归属依据'+('（续）' if start else ''), structure['reason'][start:start+140]] for start in range(0,len(structure['reason']),140)], ['工程结构来源证据', structure['evidence_id']],
-                        ['项目费用归属', '项目级费用单列；不按比例分摊至单项/单位工程']])
+                        ['项目费用归属', '按适用节点规则逐级取费，下级费用只汇总一次，不自动分摊' if snapshot['rules'] and snapshot['rules'][0].get('node_fees') else '项目级费用单列；不按比例分摊至单项/单位工程']])
         result.append(('工程结构与归属', ['单项工程', '单位工程', '清单编码', '清单', '单位', '原始依据'],
                        [[nodes.get(nodes.get(structure['assignments'].get(b['id']),{}).get('parent_id'),{}).get('name','未归属'),
                          nodes.get(structure['assignments'].get(b['id']),{}).get('name','未归属'), b['code'], b['name'], b['unit'], structure['evidence_id']] for b in items]))
@@ -186,7 +186,20 @@ def tables(p, q, approved):
                            for u in engineering['nodes'] if u['parent_id']==single['id']])
         grouped.append(['建设项目',q['project_name'],'',len(engineering['assignments']),engineering['subtotal'],engineering['project_fees'],engineering['total']])
         result[1] = ('分级汇总', ['层级','工程名称','上级工程','清单项数','分部分项金额','项目级费用','汇总金额'],grouped)
-        summary.append(['逐级金额核对', '单位工程 → 单项工程 → 建设项目分部分项 + 项目级费用 = 报价总价；闭合'])
+        if engineering.get('scoped_fees'):
+            grouped=[]
+            for single in [n for n in engineering['nodes'] if n['kind']=='single']:
+                for n in [single]+[u for u in engineering['nodes'] if u['parent_id']==single['id']]:
+                    grouped.append(['单项工程' if n['kind']=='single' else '单位工程',n['name'],q['project_name'] if n['kind']=='single' else single['name'],n['line_count'],n['subtotal'],n['lower_fees'],n['own_fees'],n['total']])
+            grouped.append(['建设项目',q['project_name'],'',len(engineering['assignments']),engineering['subtotal'],engineering['descendant_fees'],engineering['project_fees'],engineering['total']])
+            result[1]=('分级汇总',['层级','工程名称','上级工程','清单项数','分部分项金额','下级费用','本级费用','汇总金额'],grouped)
+        summary.append(['逐级金额核对', '清单合价 + 全部各级费用 = 报价总价；下级费用逐层只汇总一次；闭合'])
+    scoped_rules = snapshot['rules'][0] if snapshot['rules'] else {}
+    if scoped_rules.get('node_fees'):
+        labels={n['id']:n for n in structures[-1]['nodes']} if structures else {}
+        result.append(('分级取费规则',['工程节点','顺序 / 费用','基数表达式','费率','取费依据 / 授权','原始证据'],
+                       [[labels.get(g['node_id'],{}).get('name','节点已移除'),str(i+1)+' / '+f['name'],json.dumps(f['basis'],ensure_ascii=False),f['rate'],f['source']+' / '+scoped_rules['license'],f['evidence_id']]
+                        for g in scoped_rules['node_fees'] for i,f in enumerate(g['fees'])]))
     substitutions = snapshot.get('resource_substitutions', [])
     if substitutions:
         states = {'draft':'待复核','approved':'已复核','rejected':'已拒绝','needs_info':'待补充'}
@@ -227,14 +240,14 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if title not in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总'): continue
+        if title not in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
             count = max((len(v)+139)//140 for v in cells)
             for part in range(count):
                 segment = [v[part*140:(part+1)*140] for v in cells]
-                if part: segment[0] = cells[0]+'（续'+str(part+1)+'）'
+                if part: segment[0] = (segment[0] or cells[0][:80])+'（续'+str(part+1)+'）'
                 expanded.append(segment)
         result[i] = (title,headers,expanded)
     result = [section for section in result if section[0] != '定额换算明细' or section[2]]
@@ -256,7 +269,7 @@ def export_report(p, q, fmt, approved, template=None):
     if fmt == 'xlsx':
         wb = Workbook()
         wb.remove(wb.active)
-        numeric_headers = {'总金额', '分部分项金额', '项目级费用', '汇总金额', '工程量', '单价', '原单价', '新单价', '合价', '基数', '费率', '金额', '消耗', '换算系数', '资源价格', '单价贡献'}
+        numeric_headers = {'总金额', '分部分项金额', '项目级费用', '下级费用', '本级费用', '汇总金额', '工程量', '单价', '原单价', '新单价', '合价', '基数', '费率', '金额', '消耗', '换算系数', '资源价格', '单价贡献'}
         for title, headers, rows in sections:
             s = wb.create_sheet(title)
             s.append([title+' — '+label])
@@ -283,7 +296,7 @@ def export_report(p, q, fmt, approved, template=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if title in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总'):
+                if title in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)

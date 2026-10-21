@@ -96,6 +96,16 @@ def rollup(p,result):
         fees=sum((Decimal(f['amount']) for f in result['fees']),Decimal(0))
         if subtotal!=Decimal(result['subtotal']) or subtotal+fees!=Decimal(result['total']):
             raise DomainError('逐级汇总、分部分项和项目费用不闭合')
+        if result.get('scoped_pricing'):
+            scoped=result['scoped_pricing'];project=scoped['project'];by_id={n['id']:n for n in scoped['nodes']}
+            own=Decimal(project['own_fees']);lower=Decimal(project['lower_fees'])
+            if subtotal+own+lower!=Decimal(result['total']) or sum((Decimal(n['own_fees']) for n in scoped['nodes']),Decimal(0))!=lower:
+                raise DomainError('逐级取费与项目总价不闭合')
+            return {'schema':'engineering-summary-v2','scoped_fees':True,'structure_id':s['id'],'structure_version':s['version'],'structure_hash':store.digest(s),
+                    'nodes':[{**n,'subtotal':money(amounts[n['id']]),'line_count':counts[n['id']],
+                              **{k:by_id[n['id']][k] for k in ['lower_fees','own_fees','total']}} for n in s['nodes']],
+                    'assignments':rows,'subtotal':money(subtotal),'project_fees':money(own),'descendant_fees':money(lower),'total':result['total'],'closed':True,
+                    'fee_policy':'单位工程、单项工程、建设项目按各自已审规则逐级取费；下级费用只向上汇总一次，不自动分摊。空工程不代表已核实无漏项。'}
         return {'schema':'engineering-summary-v1','structure_id':s['id'],'structure_version':s['version'],'structure_hash':store.digest(s),
                 'nodes':[{**n,'subtotal':money(amounts[n['id']]),'line_count':counts[n['id']]} for n in s['nodes']],
                 'assignments':rows,'subtotal':money(subtotal),'project_fees':money(fees),'total':result['total'],'closed':True,

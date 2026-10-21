@@ -18,7 +18,7 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.17.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.18.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -146,6 +146,8 @@ def blockers(p):
     out.extend(date_issues(p))
     from .engineering_structure import issues as structure_issues
     out.extend(structure_issues(p))
+    from .scoped_rules import issues as scoped_issues
+    out.extend(scoped_issues(p))
     if any(x['state'] not in ('approved', 'rejected', 'superseded') for x in p['facts']):
         out.append('存在未审核或冲突的工程事实')
     if any(x['state'] == 'conflict' for x in p.get('dimension_candidates', [])):
@@ -240,7 +242,8 @@ def view(p):
     from .pricing_basis import issues as date_issues
     from .reconciliation import context_hash
     from .pricing_tasks import tasks
-    return {**p, 'pricing_tasks': tasks(p), 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities(), 'document_request_source_issues': source_issues(p), 'pricing_basis_issues': date_issues(p), 'quantity_context_hash': context_hash(p)}
+    structure = p['engineering_structures'][-1] if p['engineering_structures'] else None
+    return {**p, 'rule_hash':store.digest(p['rules'][0]) if p['rules'] else '', 'engineering_structure_hash': store.digest(structure) if structure else '', 'pricing_tasks': tasks(p), 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities(), 'document_request_source_issues': source_issues(p), 'pricing_basis_issues': date_issues(p), 'quantity_context_hash': context_hash(p)}
 
 
 class Login(BaseModel):
@@ -653,10 +656,14 @@ def rules(pid: str, body: dict, a=Depends(actor)):
     validate_rules(body)
     with store.transaction() as c:
         p = project(c, pid, a)
+        if 'object_hash' in body and body['object_hash'] != (store.digest(p['rules'][0]) if p['rules'] else ''):
+            raise HTTPException(409, '计价规则已变化，请刷新后核对再提交')
         require_evidence(p, body['evidence_id'])
+        from .scoped_rules import validate as validate_scoped
+        validate_scoped(p, body)
         if p['rules']:
             p.setdefault('rule_history', []).extend(p['rules'])
-        p['rules'] = [{**{k: body[k] for k in required}, 'rounding_config': body.get('rounding_config', {}), 'id': store.uid(), 'state': 'draft'}]
+        p['rules'] = [{**{k: body[k] for k in required}, 'rounding_config': body.get('rounding_config', {}), 'node_fees':body.get('node_fees', []), 'structure_hash':body.get('structure_hash','') if body.get('node_fees') else '', 'id': store.uid(), 'state': 'draft'}]
         invalidate(p, 'quotes')
         store.audit(c, p, a, 'RULESET_UPDATED', p['rules'][0])
         store.save(c, p)
@@ -790,6 +797,8 @@ def apply_review(c, p, body, a, hash_verified=False):
                 rule['state'] = 'superseded'
             invalidate_dependents(p, {r['id'] for r in obsolete})
         if collection == 'rules':
+            from .scoped_rules import validate as validate_scoped
+            validate_scoped(p, target)
             require_evidence(p, target['evidence_id'])
             if target['region'] != p['region'] or not date.fromisoformat(target['valid_from']) <= effective_date(p) <= date.fromisoformat(target['valid_until']):
                 raise HTTPException(409, '规则包地区或有效期不适用')
@@ -809,6 +818,8 @@ def apply_review(c, p, body, a, hash_verified=False):
             from .workflows import validate_price_change
             validate_price_change(p, target)
         if collection == 'quotes':
+            from .scoped_rules import validate as validate_scoped
+            if p['rules']:validate_scoped(p,p['rules'][0])
             from .engineering_structure import latest as current_structure, validate as validate_structure
             if current_structure(p):
                 validate_structure(p, current_structure(p))
@@ -917,7 +928,9 @@ def quote(pid: str, a=Depends(actor)):
         snapshot['resource_substitutions']=p['resource_substitutions']
         snapshot['applied_resource_substitutions']=p['applied_resource_substitutions']
         snapshot['engineering_structures']=p['engineering_structures']
-        result = calculate(p['boq'], ruleset)
+        from .scoped_rules import validate as validate_scoped
+        validate_scoped(p, ruleset)
+        result = calculate(p['boq'], ruleset, current_structure(p))
         engineering_summary = rollup(p, result)
         if engineering_summary:
             result['engineering_summary'] = engineering_summary
@@ -955,7 +968,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.17.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.18.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')

@@ -185,7 +185,7 @@ def build_price_change(p, body):
         b = next(x for x in after_boq if x['id'] == entry['boq_id'])
         b['quotas'][entry['quota_index']]['resources'][entry['resource_index']] = entry['after']
     rules = p['rules'][0] if p['rules'] else {'fees': []}
-    previous, updated = calculate(before, {**rules, 'fees': []}), calculate(after_boq, {**rules, 'fees': []})
+    previous, updated = calculate(before, {**rules, 'fees': [], 'node_fees': []}), calculate(after_boq, {**rules, 'fees': [], 'node_fees': []})
     with localcontext() as ctx:
         ctx.prec = 80
         delta = money(Decimal(updated['subtotal'])-Decimal(previous['subtotal']))
