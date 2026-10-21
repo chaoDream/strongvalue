@@ -233,6 +233,11 @@ def tables(p, q, approved):
                        [[x['boq_name'],x['candidate']['name']+' / '+x['candidate']['boq_id'],x['candidate']['discipline']+' / '+x['candidate']['quota_edition'],
                          x['candidate']['applicability']+' / '+x['candidate']['reuse_basis'],x['reason'],x['author']+' / '+x['created_at'],x['candidate_hash'],
                          ', '.join(sorted({x['candidate']['reuse_evidence_id']}|{q['evidence_id'] for q in x['candidate']['quotas']}))] for x in snapshot['quota_adoptions']]))
+    if snapshot.get('enterprise_quota_adoptions'):
+        result.append(('企业定额复用台账',['目标清单','原项目 / 定额候选','专业 / 定额年度','适用条件 / 跨项目许可','目标价格处理','采用理由 / 人员 / 时间','企业条目校验值','目标原件证据'],
+                       [[x['boq_name'],x['entry']['source_project_name']+' / '+x['entry']['candidate']['name'],x['entry']['candidate']['discipline']+' / '+x['entry']['candidate']['quota_edition'],
+                         x['entry']['candidate']['applicability']+' / '+x['entry']['reuse_basis'],'采用时全部转为待询价；当前价格以本报价资源表及审核为准',
+                         x['reason']+' / '+x['author']+' / '+x['created_at'],x['entry_hash'],', '.join(x['proof_map'].values())] for x in snapshot['enterprise_quota_adoptions']]))
     if snapshot.get('quantity_diagnoses'):
         from .quantity_diagnosis import CATEGORIES
         from .reconciliation import context_hash
@@ -245,7 +250,7 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if title not in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账'): continue
+        if title not in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
@@ -268,7 +273,7 @@ def export_report(p, q, fmt, approved, template=None):
     if fmt == 'json':
         data = {'project': {'id': p['id'], 'name': p['name'], 'scope': p['scope']}, 'status': label,
                 'quote': q, 'report_reviews': [r for r in p['reviews'] if q and r['collection'] == 'quotes' and r['object_id'] == q['id']],
-                'unpriced': None if q else {k: p[k] for k in ['documents', 'evidence', 'facts', 'components', 'takeoffs', 'boq', 'reviews', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'catalog']},
+                'unpriced': None if q else {k: p[k] for k in ['documents', 'evidence', 'facts', 'components', 'takeoffs', 'boq', 'reviews', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'catalog', 'enterprise_quota_adoptions']},
                 'tables': sections, 'report_template': template}
         return json.dumps(data, ensure_ascii=False, indent=2).encode(), 'application/json', 'json'
     if fmt == 'xlsx':
@@ -301,7 +306,7 @@ def export_report(p, q, fmt, approved, template=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if title in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账'):
+                if title in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)

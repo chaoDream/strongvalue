@@ -68,7 +68,7 @@ def reference_errors(p,items=None,verify_bytes=False):
 def create(p,body,a):
     b=core.find(p,'boq',body.get('boq_id'))
     if body.get('object_hash')!=store.digest(b):raise HTTPException(409,'原清单已变化，请刷新后核对')
-    if b.get('catalog_ref'):raise HTTPException(409,'已采用的候选不能循环发布；请使用原清单')
+    if b.get('catalog_ref') or b.get('enterprise_quota_ref'):raise HTTPException(409,'已采用的候选不能循环发布；请使用原清单')
     if b['state']!='approved' or not b['quotas'] or core.price_blockers({**p,'boq':[b]},p):raise HTTPException(409,'只能保存来源完整的已审组价')
     for key in ['discipline','quota_edition','applicability','reuse_basis','reuse_evidence_id']:text(body,key)
     try:start,end=date.fromisoformat(body['valid_from']),date.fromisoformat(body['valid_until'])
@@ -81,6 +81,9 @@ def create(p,body,a):
     item.update(id=store.uid(),schema='quota-catalog-v2',region=p['region'],standard=rule['standard'],edition=rule['version'],
                 state='draft',created_at=store.now(),author=a['username'],boq_id=b['id'],source_hash=store.digest(b),evidence_id=b['quotas'][0]['evidence_id'])
     validate(p,item,True)
+    for eid in proof_ids(item):
+        ev=core.require_evidence(p,eid);doc=core.find(p,'documents',ev['document_id'])
+        if ev.get('quota_library_origin') or doc.get('quota_library_origin'):raise HTTPException(409,'企业复用依据不能循环发布，请在原项目维护')
     return item
 
 
@@ -153,6 +156,7 @@ def adopt(pid:str,bid:str,eid:str,body:dict,a=Depends(core.actor)):
                 'candidate_hash':store.digest(item),'candidate':copy.deepcopy(item),'before_quotas':copy.deepcopy(b['quotas']),
                 'preview_hash':context,'reason':reason,'author':a['username'],'created_at':store.now()}
         core.invalidate(p,'quotes')
+        b.pop('enterprise_quota_ref',None)
         b.update(quotas=copy.deepcopy(item['quotas']),catalog_ref={'id':eid,'hash':store.digest(item),'adoption_id':record['id']},state='draft')
         p['status']='BOQ_DRAFT'
         p.setdefault('quota_adoptions',[]).append(record)

@@ -18,7 +18,7 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.19.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.20.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -89,7 +89,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions']:
         p.setdefault(key, [])
     return p
 
@@ -233,6 +233,8 @@ def price_blockers(p, catalog_context=None):
     out.extend(reference_errors(p))
     from .quota_catalog import reference_errors as catalog_errors
     out.extend(catalog_errors(catalog_context or p,p['boq']))
+    from .enterprise_quotas import reference_errors as enterprise_errors
+    out.extend(enterprise_errors(catalog_context or p,p['boq']))
     from .resource_substitutions import reference_errors as substitution_errors
     out.extend(substitution_errors(p))
     return out
@@ -638,6 +640,11 @@ def update_boq(pid: str, bid: str, body: dict, a=Depends(actor)):
         if body.get('detach_catalog') is True or 'quotas' in body and body['quotas'] != b['quotas']:
             previous_ref=b.pop('catalog_ref',None)
             if previous_ref:store.audit(c,p,a,'QUOTA_CANDIDATE_DETACHED',{'boq_id':bid,'previous_ref':previous_ref,'reason':body.get('reason') or '人工修改定额与资源，保留历史采用记录'})
+        if b.get('enterprise_quota_ref'):
+            from .enterprise_quotas import composition_hash
+            if body.get('detach_catalog') is True or 'quotas' in body and composition_hash(body['quotas'])!=composition_hash(b['quotas']):
+                previous_ref=b.pop('enterprise_quota_ref')
+                store.audit(c,p,a,'ENTERPRISE_QUOTA_DETACHED',{'boq_id':bid,'previous_ref':previous_ref,'reason':body.get('reason') or '人工修改定额消耗组成，保留历史采用记录'})
         invalidate(p, 'boq')
         b.update({k: body[k] for k in ['code', 'name', 'features', 'node', 'quotas'] if k in body})
         b['state'] = 'draft'
@@ -790,7 +797,8 @@ def apply_review(c, p, body, a, hash_verified=False):
             if substitution_issues:
                 raise HTTPException(409, '；'.join(substitution_issues))
             from .quota_catalog import reference_errors as catalog_errors
-            catalog_issues=catalog_errors(p,[target],True)
+            from .enterprise_quotas import reference_errors as enterprise_errors
+            catalog_issues=catalog_errors(p,[target],True)+enterprise_errors(p,[target],True)
             if catalog_issues:raise HTTPException(409,'；'.join(catalog_issues))
             from .extensions import validate_links
             validate_links(p, target)
@@ -833,7 +841,8 @@ def apply_review(c, p, body, a, hash_verified=False):
             validate_price_change(p, target)
         if collection == 'quotes':
             from .quota_catalog import reference_errors as catalog_errors
-            catalog_issues=catalog_errors(p,verify_bytes=True)
+            from .enterprise_quotas import reference_errors as enterprise_errors
+            catalog_issues=catalog_errors(p,verify_bytes=True)+enterprise_errors(p,verify_bytes=True)
             if catalog_issues:raise HTTPException(409,'；'.join(catalog_issues))
             from .scoped_rules import validate as validate_scoped
             if p['rules']:validate_scoped(p,p['rules'][0])
@@ -923,7 +932,8 @@ def quote(pid: str, a=Depends(actor)):
         if date_errors:
             raise HTTPException(409, '计价日期尚未核准：'+'；'.join(date_errors))
         from .quota_catalog import reference_errors as catalog_errors
-        issues = price_blockers(p)+catalog_errors(p,verify_bytes=True)
+        from .enterprise_quotas import reference_errors as enterprise_errors
+        issues = price_blockers(p)+catalog_errors(p,verify_bytes=True)+enterprise_errors(p,verify_bytes=True)
         if issues:
             raise HTTPException(409, 'PRICE_UNAVAILABLE：'+'；'.join(issues))
         if not p['rules'] or p['rules'][0]['state'] != 'approved':
@@ -948,6 +958,7 @@ def quote(pid: str, a=Depends(actor)):
         snapshot['engineering_structures']=p['engineering_structures']
         snapshot['catalog']=p['catalog']
         snapshot['quota_adoptions']=p.get('quota_adoptions',[])
+        snapshot['enterprise_quota_adoptions']=p['enterprise_quota_adoptions']
         from .scoped_rules import validate as validate_scoped
         validate_scoped(p, ruleset)
         result = calculate(p['boq'], ruleset, current_structure(p))
@@ -988,7 +999,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.19.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.20.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
@@ -1107,6 +1118,8 @@ from .quote_comparison import router as quote_comparison_router
 app.include_router(quote_comparison_router)
 from .quota_catalog import router as quota_catalog_router
 app.include_router(quota_catalog_router)
+from .enterprise_quotas import router as enterprise_quota_router
+app.include_router(enterprise_quota_router)
 from .delivery import router as delivery_router
 app.include_router(delivery_router)
 

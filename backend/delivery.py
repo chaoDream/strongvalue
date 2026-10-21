@@ -109,7 +109,7 @@ def export_bundle(c, p, q, template=None):
     if q:
         files['quote.json'] = store.canonical(q).encode()
     else:
-        files['unpriced-snapshot.json'] = store.canonical({k: p[k] for k in ['documents', 'evidence', 'facts', 'components', 'takeoffs', 'boq', 'rules', 'reviews', 'coverage', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'changes', 'applied_changes', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures']}).encode()
+        files['unpriced-snapshot.json'] = store.canonical({k: p[k] for k in ['documents', 'evidence', 'facts', 'components', 'takeoffs', 'boq', 'rules', 'reviews', 'coverage', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'changes', 'applied_changes', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'catalog', 'enterprise_quota_adoptions']}).encode()
     files['audit.json'] = store.canonical(audit).encode()
     files['delivery-check.json'] = store.canonical(check).encode()
     files['verify_delivery.py'] = (Path(__file__).resolve().parent.parent/'scripts'/'verify_delivery.py').read_bytes()
