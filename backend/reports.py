@@ -264,8 +264,8 @@ def tables(p, q, approved):
     return watermark, result
 
 
-def export_report(p, q, fmt, approved, template=None):
-    label, sections = tables(p, q, approved)
+def export_report(p, q, fmt, approved, template=None, table_data=None):
+    label, sections = table_data if table_data is not None else tables(p, q, approved)
     if template:
         sections[0][2].extend([['编制单位', template['organization']], ['企业模板', template['name']+' V'+str(template['version'])],
                                ['内部说明', template['cover_note']], ['模板性质', template['purpose']]])
@@ -306,7 +306,7 @@ def export_report(p, q, fmt, approved, template=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if title in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
+                if table_data is not None or title in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)
