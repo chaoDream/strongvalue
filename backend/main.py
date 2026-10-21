@@ -18,7 +18,7 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.8.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.9.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -272,24 +272,37 @@ def get_project(pid: str, a=Depends(actor)):
 
 
 def parse_job(pid, did, jid, a):
+    from .task_execution import claim,current,validate_source,original_bytes,fail
+    token=claim(pid,did,jid,a)
+    if token is None:return
     try:
         with store.transaction() as c:
             p = project(c, pid, a)
             d = find(p, 'documents', did)
+            job=find(p,'jobs',jid)
+            if not current(job,token):return
+            validate_source(d,job)
+            original_bytes(d)
             if d.get('parsed'):
-                find(p, 'jobs', jid)['state'] = 'completed'
+                job.update(state='completed',finished_at=store.now(),message='原件已有完整解析结果，未重复生成')
                 store.save(c, p)
                 return
             find(p, 'jobs', jid)['state'] = 'running'
             store.save(c, p)
-        pages = extract(Path(d['name']).suffix.lower(), (store.ROOT/'originals'/d['hash']).read_bytes())
-        raw = (store.ROOT/'originals'/d['hash']).read_bytes()
+        raw=original_bytes(d)
+        pages = extract(Path(d['name']).suffix.lower(), raw)
         vector_objects = pdf_text_anchors(raw) if d['name'].lower().endswith('.pdf') else dxf_objects(raw)[0] if d['name'].lower().endswith('.dxf') else []
         with store.transaction() as c:
             p = project(c, pid, a)
             d = find(p, 'documents', did)
+            job=find(p,'jobs',jid)
+            if not current(job,token):return
+            validate_source(d,job)
+            original_bytes(d)
             # Retry is idempotent: a completed document is not parsed twice.
             if d.get('parsed'):
+                job.update(state='completed',finished_at=store.now(),message='已有解析结果，未重复写入')
+                store.save(c,p)
                 return
             for page, text in pages:
                 if not text.strip():
@@ -317,17 +330,12 @@ def parse_job(pid, did, jid, a):
             d['pages'] = len(pages)
             d['parse_state'] = 'needs_review'
             d['message'] = '文字已提取；尺寸及事实须人工复核' if any(t.strip() for _, t in pages) else '未提取到可用文字；扫描图需 OCR/视觉适配器，或手工标注证据'
-            find(p, 'jobs', jid).update(state='completed', message=d['message'])
+            job.update(state='completed', message=d['message'],finished_at=store.now())
             p['status'] = 'FACTS_REVIEW'
             store.audit(c, p, a, 'DOCUMENT_PARSED', {'document_id': did, 'pages': len(pages)})
             store.save(c, p)
     except Exception as exc:
-        with store.transaction() as c:
-            p = project(c, pid, a)
-            find(p, 'documents', did)['parse_state'] = 'failed'
-            find(p, 'jobs', jid).update(state='failed', message=str(exc)[:300])
-            store.audit(c, p, a, 'PARSE_FAILED', {'document_id': did, 'error': str(exc)[:300]})
-            store.save(c, p)
+        fail(pid,did,jid,a,token,exc)
 
 
 @app.post('/api/v1/projects/{pid}/documents')
@@ -359,7 +367,7 @@ async def upload(pid: str, tasks: BackgroundTasks, specialty: str = Form(...), f
                 record['state'] = 'superseded'
         d = {'id': store.uid(), 'name': name, 'hash': sha, 'size': len(raw), 'specialty': specialty,
              'version': len(previous)+1, 'parse_state': 'queued', 'uploaded_at': store.now(), 'supersedes': [d['id'] for d in previous]}
-        job = {'id': store.uid(), 'document_id': d['id'], 'state': 'queued', 'message': '等待解析'}
+        job = {'id': store.uid(), 'document_id': d['id'], 'state': 'queued', 'message': '等待解析','kind':'local_parse','source_hash':sha,'attempts':0}
         p['documents'].append(d)
         p['jobs'].append(job)
         p['coverage'].pop(specialty, None)
@@ -384,12 +392,12 @@ def retry(pid: str, jid: str, tasks: BackgroundTasks, a=Depends(actor)):
         j = find(p, 'jobs', jid)
         if j['state'] != 'failed':
             raise HTTPException(409, '任务仍在队列/执行中或已完成，无需重复提交；中断任务在服务恢复后可重试')
-        if j.get('kind') == 'model_analysis':
-            from . import gateway
-            config = gateway.configuration()
-            if not config['configured'] or config['destination'] != j['destination'] or config['model'] != j['model']:
-                raise HTTPException(409, '模型配置已变化，请重新确认接收方后发起解析')
-        j['state'] = 'queued'
+        from .task_execution import validate_source,validate_model
+        doc=find(p,'documents',j['document_id'])
+        validate_source(doc,j)
+        if j.get('kind') == 'model_analysis':validate_model(p,doc,j)
+        j.update(state='queued',message='已申请重试，等待执行',finished_at=None)
+        store.audit(c,p,a,'JOB_RETRY_REQUESTED',{'job_id':jid,'previous_attempts':j.get('attempts',0)})
         store.save(c, p)
     if j.get('kind') == 'model_analysis':
         from .analysis_routes import analyze_job
@@ -825,7 +833,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.8.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.9.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')

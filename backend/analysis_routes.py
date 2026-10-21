@@ -1,4 +1,3 @@
-import hashlib
 from decimal import Decimal
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from . import main as core, store, gateway
@@ -12,23 +11,29 @@ def ai_capabilities(a=Depends(core.actor)):
 
 
 def analyze_job(pid, did, jid, actor):
+    from .task_execution import claim,current,validate_source,validate_model,original_bytes,fail,source_evidence
+    token=claim(pid,did,jid,actor)
+    if token is None:return
     try:
         with store.transaction() as c:
             p = core.project(c, pid, actor)
             job = core.find(p, 'jobs', jid)
-            if job['state'] == 'completed': return
+            if not current(job,token):return
             doc = core.find(p, 'documents', did)
-            if doc.get('superseded'): raise HTTPException(409, '该图纸版本已被替代')
-            evidence = [e for e in p['evidence'] if e['document_id'] == did and not e['method'].startswith('model_')]
+            validate_source(doc,job)
+            validate_model(p,doc,job)
+            evidence = source_evidence(p,did)
             job['state'] = 'running'
             store.save(c, p)
-        result = gateway.request_gateway(doc, (store.ROOT/'originals'/doc['hash']).read_bytes(), evidence)
+        result = gateway.request_gateway(doc, original_bytes(doc), evidence)
         with store.transaction() as c:
             p = core.project(c, pid, actor)
-            current = core.find(p, 'documents', did)
+            current_doc = core.find(p, 'documents', did)
             job = core.find(p, 'jobs', jid)
-            if job['state'] == 'completed': return
-            if current.get('superseded'): raise HTTPException(409, '解析期间图纸已更新，候选不入当前数据')
+            if not current(job,token):return
+            validate_source(current_doc,job)
+            original_bytes(current_doc)
+            validate_model(p,current_doc,job)
             candidates, rejected = [], []
             for candidate in result['candidates']:
                 source = next((e for e in evidence if (e['page'] == candidate['page'] or e['page'] is None) and candidate['quote'] in e['text']), None)
@@ -62,16 +67,12 @@ def analyze_job(pid, did, jid, actor):
                         'response_hash': store.digest(result), 'result': result, 'accepted_candidates': candidates, 'rejected_candidates': rejected,
                         'timestamp': store.now(), 'notice': '候选仅用于人工核对；视觉证据未自动验证'}
             p['analyses'].append(analysis)
-            job.update(state='completed', message=f'形成{len(candidates)}条待复核候选，拒绝{len(rejected)}条无法定位结果')
+            job.update(state='completed', finished_at=store.now(),message=f'形成{len(candidates)}条待复核候选，拒绝{len(rejected)}条无法定位结果')
             core.invalidate(p, 'facts')
             store.audit(c, p, actor, 'MODEL_ANALYSIS_COMPLETED', {'job_id': jid, 'response_hash': analysis['response_hash'], 'candidates': len(candidates)})
             store.save(c, p)
     except Exception as exc:
-        with store.transaction() as c:
-            p = core.project(c, pid, actor)
-            core.find(p, 'jobs', jid).update(state='failed', message=str(getattr(exc, 'detail', exc))[:300])
-            store.audit(c, p, actor, 'MODEL_ANALYSIS_FAILED', {'job_id': jid, 'reason': str(getattr(exc, 'detail', exc))[:300]})
-            store.save(c, p)
+        fail(pid,did,jid,actor,token,exc,model=True)
 
 
 @router.post('/projects/{pid}/documents/{did}/analyze')
@@ -85,13 +86,12 @@ def analyze(pid: str, did: str, body: dict, tasks: BackgroundTasks, a=Depends(co
         p = core.project(c, pid, a)
         d = core.find(p, 'documents', did)
         if d.get('superseded'): raise HTTPException(409, '不能解析历史替代版作为当前数据')
-        original_evidence = [{'id':e['id'],'page':e['page'],'text':e['text']} for e in p['evidence'] if e['document_id'] == did and not e['method'].startswith('model_')]
-        key = store.digest({'hash': d['hash'], 'model': config['model'], 'contract': config['contract'], 'protocol': config['protocol'],
-                            'destination': config['destination'], 'source_evidence':original_evidence, 'prompt_version':'drawing-extraction-1.0'})
+        from .task_execution import analysis_key,PROMPT_VERSION
+        key=analysis_key(p,d,config)
         old = next((j for j in p['jobs'] if j.get('job_key') == key and j['state'] != 'failed'), None)
         if old: return {'duplicate': True, 'job': old}
         job = {'id': store.uid(), 'document_id': did, 'kind': 'model_analysis', 'job_key': key, 'state': 'queued', 'message': '等待模型网关解析',
-               'destination': config['destination'], 'model': config['model'], 'protocol':config['protocol'], 'prompt_version':'drawing-extraction-1.0'}
+               'destination': config['destination'], 'model': config['model'], 'protocol':config['protocol'], 'prompt_version':PROMPT_VERSION,'source_hash':d['hash'],'attempts':0}
         p['jobs'].append(job)
         store.audit(c, p, a, 'MODEL_ANALYSIS_CONSENT', {'document_id': did, 'document_hash': d['hash'], 'destination': config['destination'], 'model': config['model']})
         store.save(c, p)
