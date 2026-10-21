@@ -18,12 +18,12 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.9.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.10.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
                 '给排水': '管线平纵断面、材质及埋深', '电气': '配电系统及敷设方式', '合同计价': '合同、计量与取费依据'}
-REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests'}
+REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases'}
 
 
 def password_hash(password, salt=None):
@@ -75,7 +75,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases']:
         p.setdefault(key, [])
     return p
 
@@ -128,6 +128,8 @@ def blockers(p):
     out.extend(mapping_issues(p))
     from .document_requests import task_issues
     out.extend(task_issues(p))
+    from .pricing_basis import issues as date_issues
+    out.extend(date_issues(p))
     if any(x['state'] not in ('approved', 'rejected', 'superseded') for x in p['facts']):
         out.append('存在未审核或冲突的工程事实')
     if any(x['state'] == 'conflict' for x in p.get('dimension_candidates', [])):
@@ -198,7 +200,8 @@ def price_blockers(p):
 def view(p):
     normalize(p)
     from .document_requests import source_issues
-    return {**p, 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities(), 'document_request_source_issues': source_issues(p)}
+    from .pricing_basis import issues as date_issues
+    return {**p, 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities(), 'document_request_source_issues': source_issues(p), 'pricing_basis_issues': date_issues(p)}
 
 
 class Login(BaseModel):
@@ -658,8 +661,13 @@ def apply_review(c, p, body, a, hash_verified=False):
         raise HTTPException(409, '对象已变更，请刷新后重新复核')
     if collection == 'document_requests' and target['state'] == 'cancelled':
         raise HTTPException(409, '已取消任务须先重新开启，不能直接复核')
+    if collection == 'pricing_bases' and target['id'] != p['pricing_bases'][-1]['id']:
+        raise HTTPException(409, '历史日期裁决只供查阅，请复核最新版本')
     approve = body['decision'] == 'approve'
     if approve:
+        if collection == 'pricing_bases':
+            from .pricing_basis import validate
+            validate(p, target)
         if collection == 'document_requests':
             from .document_requests import validate_submission
             if target['state'] not in ('submitted', 'approved'):
@@ -747,7 +755,7 @@ def apply_review(c, p, body, a, hash_verified=False):
                 for b in p['boq']:
                     if any(r.get('price_change_id') == target['id'] for q in b['quotas'] for r in q['resources']):
                         b['state'] = 'stale'
-            if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests'):
+            if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases'):
                 invalidate(p, 'quotes')
             else:
                 invalidate(p, collection)
@@ -755,6 +763,10 @@ def apply_review(c, p, body, a, hash_verified=False):
             p['status'] = 'TAKEOFF_APPROVED' if collection == 'takeoffs' else 'BOQ_APPROVED'
     if collection == 'document_requests':
         target.update(version=target['version']+1, updated_at=store.now())
+        invalidate(p, 'quotes')
+    if collection == 'pricing_bases':
+        if approve:
+            p['pricing_date'] = target['pricing_date']
         invalidate(p, 'quotes')
     store.audit(c, p, a, 'REVIEW_DECISION', record)
     return record
@@ -783,6 +795,10 @@ def quote(pid: str, a=Depends(actor)):
         p = project(c, pid, a)
         if not p['boq'] or any(x['state'] != 'approved' for x in p['boq']):
             raise HTTPException(409, '请先审定清单')
+        from .pricing_basis import issues as date_issues
+        date_errors = date_issues(p)
+        if date_errors:
+            raise HTTPException(409, '计价日期尚未核准：'+'；'.join(date_errors))
         issues = price_blockers(p)
         if issues:
             raise HTTPException(409, 'PRICE_UNAVAILABLE：'+'；'.join(issues))
@@ -800,6 +816,7 @@ def quote(pid: str, a=Depends(actor)):
         snapshot.update(boq_mappings=p['boq_mappings'], boq_standard=p.get('boq_standard',''), boq_edition=p.get('boq_edition',''))
         snapshot['library_snapshots']=p['library_snapshots']
         snapshot['document_requests']=p['document_requests']
+        snapshot['pricing_bases']=p['pricing_bases']
         result = calculate(p['boq'], ruleset)
         q = {'id': store.uid(), 'version': len(p['quotes'])+1, 'created_at': store.now(), 'state': 'draft',
              'input_hash': store.digest(snapshot), 'snapshot': json.loads(store.canonical(snapshot)), **result,
@@ -807,6 +824,8 @@ def quote(pid: str, a=Depends(actor)):
         q['source_mode'] = 'imported_or_mixed' if any(t.get('source_kind') == 'imported_boq' for t in p['takeoffs']) else 'original_documents'
         if q['source_mode'] == 'imported_or_mixed':
             q['warnings'].append('包含已有清单导入数量；兼容流程不等于原始图纸自动算量验收')
+        if not p['pricing_bases']:
+            q['warnings'].append('尚未登记多时间节点专业裁决，计价日期按项目手工设置或当前日期检查')
         if not p.get('require_golden_baseline'):
             q['warnings'].append('未启用同构件独立底稿门禁；本报告不代表黄金算例验收通过')
         q['hash'] = store.digest(q)
@@ -833,7 +852,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.9.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.10.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
@@ -911,6 +930,8 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+from .pricing_basis import router as pricing_basis_router
+app.include_router(pricing_basis_router)
 from .extensions import router as extension_router
 app.include_router(extension_router)
 from .analysis_routes import router as analysis_router

@@ -10,7 +10,7 @@ type Props = {
   sourceLink: (id: string) => React.ReactNode;
   reviewDetails: (collection: string, item: Obj) => React.ReactNode;
 };
-const names: Obj = {facts:'工程事实', components:'构件尺寸', takeoffs:'工程量', boq:'清单', rules:'计价规则',
+const names: Obj = {pricing_bases:'项目适用日期裁决',facts:'工程事实', components:'构件尺寸', takeoffs:'工程量', boq:'清单', rules:'计价规则',
   coverage:'资料完整性', dimension_candidates:'尺寸候选', reconciliations:'专业底稿', catalog:'定额候选',
   changes:'变更签证', price_changes:'资源调价', quotes:'报价成果',boq_mappings:'清单编码映射',document_requests:'补件任务'};
 const states: Obj = {submitted:'待关闭复核',in_progress:'处理中',cancelled:'已取消',draft:'待复核', approved:'已审定', stale:'已失效', rejected:'已拒绝', needs_info:'待补件', conflict:'存在冲突'};

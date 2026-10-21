@@ -97,6 +97,14 @@ def tables(p, q, approved):
                ['说明', '仅覆盖所列试点范围，签章由有权专业人员依法完成。']]
     summary.extend([['计价适用日期', snapshot.get('pricing_date') or p.get('pricing_date') or '当前日期'],
                     ['数量来源', '包含已有清单兼容导入，非原图自动算量验收' if q and q.get('source_mode') == 'imported_or_mixed' else '构件计算书 / 人工审定证据']])
+    dates = snapshot.get('pricing_bases', [])
+    if dates:
+        b = dates[-1]
+        summary.extend([['项目日期裁决', 'V'+str(b['version'])+' / '+b['state']], ['日期选择与冲突裁决依据', b['reason']], ['日期裁决来源证据', b['evidence_id']]])
+        labels = {'tender':'招标','contract':'合同签订','design':'设计版次','construction':'施工','settlement':'结算'}
+        summary.extend([[labels[k]+'日期', m['date']+(' / '+m['edition'] if m.get('edition') else '')+' / 证据 '+m['evidence_id']] for k,m in b['milestones'].items()])
+    else:
+        summary.append(['项目日期裁决', '未登记多时间节点专业裁决'])
     hierarchy = defaultdict(Decimal)
     for b in items:
         if q:

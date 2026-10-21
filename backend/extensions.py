@@ -103,6 +103,8 @@ def project_settings(pid: str, body: dict, a=Depends(core.actor)):
                 date.fromisoformat(body['pricing_date'])
             except (ValueError, TypeError):
                 raise HTTPException(422, '计价适用日期须为 YYYY-MM-DD')
+            if p.get('pricing_bases') and body['pricing_date'] != p['pricing_bases'][-1]['pricing_date']:
+                p['pricing_bases'][-1]['state'] = 'stale'
             p['pricing_date'] = body['pricing_date']
         if 'boq_standard' in body or 'boq_edition' in body:
             if any(not isinstance(body.get(k),str) or not body[k].strip() or len(body[k])>200 for k in ['boq_standard','boq_edition']):

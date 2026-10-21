@@ -1,6 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {Plus, Upload, GitCompareArrows, Split, Merge, FilePenLine, FlaskConical, CalendarDays, BookOpen, Search, ScanText, X, RefreshCw, FileCheck2, ExternalLink} from 'lucide-react';
 
+import PricingBasisPanel from './PricingBasisPanel';
 import MembersPanel from './MembersPanel';
 import ComparisonView from './ComparisonView';
 import WorkflowPanel from './WorkflowPanel';
@@ -103,6 +104,7 @@ export default function EngineeringTools({section,p,user,request,refresh,onRevie
  return <div className="engineering-tools">
   <WorkflowPanel section={section} p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink} reviewDetails={reviewDetails}/>
   {section==='boq'&&<BoqMappingPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/>}
+  {['summary','settings'].includes(section)&&<PricingBasisPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/>}
   {section==='pricing'&&<ResourceLibraryPanel p={p} user={user} request={request} refresh={refresh}/>}
   <ReportTemplatesPanel section={section} user={user} request={request} value={reportTemplateId} onChange={onReportTemplateChange}/>
   {error&&!dialog&&<div role="alert" className="error-banner">{error}<button className="icon-btn" onClick={()=>setError('')} aria-label="关闭提示"><X size={15}/></button></div>}

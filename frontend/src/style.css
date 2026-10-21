@@ -2698,3 +2698,16 @@ input::placeholder,textarea::placeholder {
 .region-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
 .evidence-index {margin-top:16px;border-top:1px solid #dce5d4;padding:12px;max-height:260px;overflow:auto;}
 .evidence-index p {font-size:11px;overflow-wrap:anywhere;color:#65735f;}
+
+.pricing-basis-card > p {
+  margin:0 22px 14px;
+}
+.pricing-basis-card > .review-details {
+  margin:16px 22px 22px;
+  color:#253831;
+  font-size:12px;
+  line-height:1.7;
+}
+.pricing-basis-card .review-details > p {
+  margin:12px 0;
+}
