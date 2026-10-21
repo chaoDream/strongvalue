@@ -2,6 +2,7 @@ import React, {useEffect, useState} from 'react';
 import {Plus, Upload, GitCompareArrows, Split, Merge, FilePenLine, FlaskConical, CalendarDays, BookOpen, Search, ScanText, X, RefreshCw, FileCheck2, ExternalLink} from 'lucide-react';
 
 import MembersPanel from './MembersPanel';
+import ComparisonView from './ComparisonView';
 import WorkflowPanel from './WorkflowPanel';
 import ReportTemplatesPanel from './ReportTemplatesPanel';
 import BoqMappingPanel from './BoqMappingPanel';
@@ -68,7 +69,8 @@ export default function EngineeringTools({section,p,user,request,refresh,onRevie
   }
   if(d.type==='compare'){
     button='对比版本';submit=async()=>{const result=await run(()=>request(base+'/quotes/compare?left='+d.left+'&right='+d.right),false);if(result)setComparison(result)};
-    form=<><div className="form-grid"><F label="基准版本">{quotePicker(d.left,v=>update('left',v))}</F><F label="对比版本">{quotePicker(d.right,v=>update('right',v))}</F></div>{comparison&&<><div className="metrics-strip"><span>原总价 ¥{cash(comparison.left_total)}</span><span>新总价 ¥{cash(comparison.right_total)}</span><b>差额 ¥{cash(comparison.total_delta)}</b></div><p className="form-note">{comparison.rules_changed?'规则包发生变化，需同时检查费用与修约口径。':'两版使用相同规则包。'}变更条目：{comparison.lines.length} 项。</p><Grid headers={['清单','变动类型','原数量 / 单价','新数量 / 单价','合价差额']}>{comparison.lines.map((l:Obj)=><tr key={l.id}><td>{l.name}</td><td>{{added:'新增',removed:'移除',changed:'修改'}[l.kind as 'added'|'removed'|'changed']}</td><td>{l.before?.quantity||'—'} / {l.before?.unit_price||'—'}</td><td>{l.after?.quantity||'—'} / {l.after?.unit_price||'—'}</td><td className="num">{cash(l.amount_delta)}</td></tr>)}</Grid><Grid headers={['费用','原金额','新金额']}>{[...new Set([...comparison.fees_before,...comparison.fees_after].map((f:Obj)=>f.name))].map((name:any)=><tr key={name}><td>{name}</td><td>{comparison.fees_before.find((f:Obj)=>f.name===name)?.amount||'—'}</td><td>{comparison.fees_after.find((f:Obj)=>f.name===name)?.amount||'—'}</td></tr>)}</Grid></>}</>;
+    form=<><div className="form-grid"><F label="基准版本">{quotePicker(d.left,v=>{update('left',v);setComparison(null)})}</F><F label="对比版本">{quotePicker(d.right,v=>{update('right',v);setComparison(null)})}</F></div>{comparison&&<ComparisonView report={comparison} busy={working} onExport={async()=>{setWorking(true);setError('');try{const r=await fetch('/api/v1'+base+'/quotes/comparison-export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({left:comparison.left_id,right:comparison.right_id,left_hash:comparison.left_hash,right_hash:comparison.right_hash,report_hash:comparison.hash})});if(!r.ok)throw new Error((await r.json()).detail);const url=URL.createObjectURL(await r.blob()),link=document.createElement('a');link.href=url;link.download='报价对账-V'+comparison.left_version+'-V'+comparison.right_version+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);await refresh()}catch(e:any){setError(e.message)}finally{setWorking(false)}}}/>}</>;
+
   }
   if(d.type==='scenario'){
     button='计算内部测算';submit=()=>run(()=>request(base+'/scenarios','POST',d)).then(()=>{});

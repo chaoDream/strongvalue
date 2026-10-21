@@ -287,21 +287,8 @@ def apply_change(pid: str, cid: str, a=Depends(core.actor)):
 def compare(pid: str, left: str, right: str, a=Depends(core.actor)):
     with store.connect() as c:
         p = core.project(c, pid, a)
-    l, r = core.find(p, 'quotes', left), core.find(p, 'quotes', right)
-    old, new = {b['id']: b for b in l['lines']}, {b['id']: b for b in r['lines']}
-    changes = []
-    for bid in sorted(old.keys() | new.keys()):
-        before, after = old.get(bid), new.get(bid)
-        keys = ['quantity', 'unit_price', 'amount', 'features', 'node', 'code', 'quotas']
-        changed = [k for k in keys if (before or {}).get(k) != (after or {}).get(k)]
-        if changed:
-            changes.append({'id': bid, 'name': (after or before)['name'], 'kind': 'added' if not before else 'removed' if not after else 'changed',
-                            'fields': changed, 'before': before, 'after': after,
-                            'amount_delta': money(Decimal((after or {}).get('amount', '0'))-Decimal((before or {}).get('amount', '0')))})
-    return {'left_version': l['version'], 'right_version': r['version'], 'left_total': l['total'], 'right_total': r['total'],
-            'total_delta': money(Decimal(r['total'])-Decimal(l['total'])), 'lines': changes,
-            'rules_changed': store.digest(l['snapshot']['rules']) != store.digest(r['snapshot']['rules']),
-            'fees_before': l['fees'], 'fees_after': r['fees']}
+    from .quote_comparison import compare_quotes
+    return compare_quotes(p, left, right)
 
 
 @router.post('/projects/{pid}/scenarios')
