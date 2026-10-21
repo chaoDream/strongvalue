@@ -114,7 +114,7 @@ def tables(p, q, approved):
               ('分部分项清单', ['编码', '名称', '项目特征', '单位', '工程量', '单价', '合价'],
                [[b['code'] or '待匹配', b['name'], b['features'], b['unit'], b['quantity'], b.get('unit_price', ''), b.get('amount', '')] for b in items]),
               ('工程量计算书', ['构件', '公式', '参数', '扣减/计量依据', '单位', '工程量', '来源证据'],
-               [[t['name'], t['formula'], json.dumps(t['parameters'], ensure_ascii=False), t['measurement_basis'], t['unit'], t['quantity'], ', '.join(t['evidence'].values())] for t in snapshot['takeoffs']]),
+               [[t['name'], t['formula'], json.dumps(t['parameters'], ensure_ascii=False), t['measurement_basis'], t['unit'], t['quantity'], ', '.join(sorted(set(t['evidence'].values())))] for t in snapshot['takeoffs']]),
               ('综合单价分析', ['清单项', '定额', '资源', '类型', '消耗', '换算系数', '资源价格', '单价贡献'],
                [[b['name'], r['quota_code'], r['name'], r.get('type', ''), r['consumption'], r['coefficient'], r['price'], r['cost']] for b in items for r in b.get('resources_snapshot', [])]),
               ('定额换算明细', ['清单项', '定额', '字段', '值'],
@@ -133,9 +133,19 @@ def tables(p, q, approved):
               ('审核记录', ['对象类型', '对象 ID', '决定', '复核人', '时间', '依据', '对象哈希'],
                [[r['collection'], r['object_id'], r['decision'], r['reviewer'], r['timestamp'], r['reason'], r['object_hash']] for r in snapshot['reviews']+report_reviews]),
               ('缺项与警示', ['事项'], [[x] for x in ((q['warnings'] if q else [])+(['当前版本已失效；源输入已变更'] if q and q['id'] in p['stale_quotes'] else []))])]
+    compound_rows = [[t['name'], ('加项' if part['operation']=='add' else '扣减')+' / '+part['name'],
+                      part['formula'], json.dumps(part['parameters'], ensure_ascii=False),
+                      part['single_quantity']+' × '+str(part['multiplicity'])+' = '+part['quantity']+' '+part['unit'],
+                      part['measurement_basis'], ', '.join(sorted(set(part['evidence'].values())))]
+                     for t in snapshot['takeoffs'] for part in t.get('measurement_parts', [])]
+    if compound_rows:
+        result.append(('分项算量与扣减明细', ['构件','分项','公式','原始尺寸','单项 × 数量 = 分项量','计量依据','来源证据'], compound_rows))
+        result.append(('分项规则与精度', ['构件','规则版本','净量 / 单位','精度规则'],
+                       [[t['name'], t['rule_version'], t['quantity']+' '+t['unit'], t['rounding_rule']]
+                        for t in snapshot['takeoffs'] if t.get('measurement_parts')]))
     if not q:
         from .main import blockers
-        result[-1][2].extend([[x] for x in blockers(p)])
+        next(table[2] for table in result if table[0] == '缺项与警示').extend([[x] for x in blockers(p)])
     if snapshot.get('document_requests'):
         result.append(('补件任务台账', ['任务', '专业', '负责人', '期限', '状态', '未关闭时阻断本次范围', '缺项说明', '补充说明', '证据'],
                        [[t['name'], t['specialty'], t['assignee'], t['due_date'], t['state'], '是' if t['blocking'] and t['specialty'] in (q['scope'] if q else p['scope']) else '否', t['detail'], (t['submissions'][-1]['note'] if t['submissions'] else ''), ', '.join(t['evidence_ids'])] for t in snapshot['document_requests']]))

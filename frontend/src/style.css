@@ -2728,3 +2728,10 @@ input::placeholder,textarea::placeholder {
 .quota-catalog-card th:nth-child(3) {width:31%;}
 .quota-catalog-card th:last-child {width:15%;}
 .quota-catalog-card td .text-btn {white-space:normal;}
+
+.compound-modal { max-width: 1040px; width: calc(100vw - 48px); }
+.compound-part { border: 1px solid var(--border, #dce3e1); border-radius: 10px; padding: 18px; margin: 18px 0; }
+.compound-part legend { padding: 0 8px; font-weight: 600; }
+.compound-record { border-top: 1px solid #e4e9e7; padding: 18px 0; }
+.compound-record summary { cursor: pointer; margin-bottom: 14px; }
+.compound-panel td { white-space: normal; overflow-wrap: anywhere; }
