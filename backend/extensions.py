@@ -339,6 +339,12 @@ def save_catalog(pid: str, body: dict, a=Depends(core.actor)):
     core.edit(a)
     with store.transaction() as c:
         p = core.project(c, pid, a)
+        if 'quota_edition' in body:
+            from .quota_catalog import create
+            item=create(p,body,a)
+            p['catalog'].append(item)
+            store.audit(c,p,a,'CATALOG_CREATED',item);store.save(c,p)
+            return item
         b = core.find(p, 'boq', body.get('boq_id'))
         if b['state'] != 'approved' or not b['quotas'] or core.price_blockers({**p, 'boq': [b]}):
             raise HTTPException(409, '只能将来源完整的已审组价保存为授权定额候选')
@@ -352,18 +358,8 @@ def save_catalog(pid: str, body: dict, a=Depends(core.actor)):
 
 
 @router.get('/projects/{pid}/boq/{bid}/quota-candidates')
-def candidates(pid: str, bid: str, a=Depends(core.actor)):
-    with store.connect() as c: p = core.project(c, pid, a)
-    b = core.find(p, 'boq', bid)
-    result = []
-    for item in p['catalog']:
-        if item['state'] != 'approved' or item['region'] != p['region'] or item['unit'] != b['unit']:
-            continue
-        if item['edition'] != (p['rules'][0]['version'] if p['rules'] else ''):
-            continue
-        if core.price_blockers({**p, 'boq': [item]}): continue
-        score = (100 if item['code'] == b['code'] else 0)+(30 if item['name'] == b['name'] else 0)
-        score += sum(1 for ch in set(b['name']+b['features']) if ch in item['name']+item['features'])
-        if score:
-            result.append({**item, 'score': score, 'match_reason': '同项目已授权且已审候选；地区/单位/规则版本过滤；编码与名称特征文字匹配，需专业确认'})
-    return sorted(result, key=lambda x: x['score'], reverse=True)[:5]
+def candidates(pid: str, bid: str, discipline: str='', quota_edition: str='', a=Depends(core.actor)):
+    if len(discipline)>100 or len(quota_edition)>200:raise HTTPException(422,'候选筛选参数过长')
+    with store.connect() as c:p=core.project(c,pid,a)
+    from .quota_catalog import candidates as search
+    return search(p,core.find(p,'boq',bid),discipline,quota_edition)

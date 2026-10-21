@@ -18,7 +18,7 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.18.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.19.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -89,7 +89,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions']:
         p.setdefault(key, [])
     return p
 
@@ -175,7 +175,7 @@ def blockers(p):
     return list(dict.fromkeys(out))
 
 
-def price_blockers(p):
+def price_blockers(p, catalog_context=None):
     from .resource_library import reference_errors
     out = []
     tax_modes = set()
@@ -231,6 +231,8 @@ def price_blockers(p):
     if len(tax_modes) > 1:
         out.append('资源含税与不含税价格混用；请按计价规则统一口径')
     out.extend(reference_errors(p))
+    from .quota_catalog import reference_errors as catalog_errors
+    out.extend(catalog_errors(catalog_context or p,p['boq']))
     from .resource_substitutions import reference_errors as substitution_errors
     out.extend(substitution_errors(p))
     return out
@@ -631,9 +633,15 @@ def update_boq(pid: str, bid: str, body: dict, a=Depends(actor)):
                         require_evidence(p, resource.get('evidence_id'))
             except (KeyError, TypeError) as e:
                 raise HTTPException(422, '定额资源字段不完整：'+str(e))
+        if body.get('detach_catalog') is True and (not isinstance(body.get('reason'),str) or not body['reason'].strip() or len(body['reason'])>3000):
+            raise HTTPException(422,'转为人工编制须填写原因')
+        if body.get('detach_catalog') is True or 'quotas' in body and body['quotas'] != b['quotas']:
+            previous_ref=b.pop('catalog_ref',None)
+            if previous_ref:store.audit(c,p,a,'QUOTA_CANDIDATE_DETACHED',{'boq_id':bid,'previous_ref':previous_ref,'reason':body.get('reason') or '人工修改定额与资源，保留历史采用记录'})
         invalidate(p, 'boq')
         b.update({k: body[k] for k in ['code', 'name', 'features', 'node', 'quotas'] if k in body})
         b['state'] = 'draft'
+        p['status'] = 'BOQ_DRAFT'
         store.audit(c, p, a, 'BOQ_UPDATED', b)
         store.save(c, p)
     return b
@@ -781,6 +789,9 @@ def apply_review(c, p, body, a, hash_verified=False):
             substitution_issues = substitution_errors({**p, 'boq': [target]})
             if substitution_issues:
                 raise HTTPException(409, '；'.join(substitution_issues))
+            from .quota_catalog import reference_errors as catalog_errors
+            catalog_issues=catalog_errors(p,[target],True)
+            if catalog_issues:raise HTTPException(409,'；'.join(catalog_issues))
             from .extensions import validate_links
             validate_links(p, target)
             from .boq_mapping import mapping_issues
@@ -807,7 +818,10 @@ def apply_review(c, p, body, a, hash_verified=False):
             if target['base_hash'] != store.digest(find(p, 'boq', target['boq_id'])):
                 raise HTTPException(409, '变更基线已变化，请重新建立变更')
         if collection == 'catalog':
-            if price_blockers({**p, 'boq': [target]}):
+            if target.get('schema')=='quota-catalog-v2':
+                from .quota_catalog import validate as validate_catalog
+                validate_catalog(p,target,True)
+            if price_blockers({**p, 'boq': [target]},p):
                 raise HTTPException(409, '定额候选来源、许可、价格或适用期间不完整')
         if collection == 'reconciliations':
             from .reconciliation import matches_context
@@ -818,6 +832,9 @@ def apply_review(c, p, body, a, hash_verified=False):
             from .workflows import validate_price_change
             validate_price_change(p, target)
         if collection == 'quotes':
+            from .quota_catalog import reference_errors as catalog_errors
+            catalog_issues=catalog_errors(p,verify_bytes=True)
+            if catalog_issues:raise HTTPException(409,'；'.join(catalog_issues))
             from .scoped_rules import validate as validate_scoped
             if p['rules']:validate_scoped(p,p['rules'][0])
             from .engineering_structure import latest as current_structure, validate as validate_structure
@@ -905,7 +922,8 @@ def quote(pid: str, a=Depends(actor)):
         date_errors = date_issues(p)
         if date_errors:
             raise HTTPException(409, '计价日期尚未核准：'+'；'.join(date_errors))
-        issues = price_blockers(p)
+        from .quota_catalog import reference_errors as catalog_errors
+        issues = price_blockers(p)+catalog_errors(p,verify_bytes=True)
         if issues:
             raise HTTPException(409, 'PRICE_UNAVAILABLE：'+'；'.join(issues))
         if not p['rules'] or p['rules'][0]['state'] != 'approved':
@@ -928,6 +946,8 @@ def quote(pid: str, a=Depends(actor)):
         snapshot['resource_substitutions']=p['resource_substitutions']
         snapshot['applied_resource_substitutions']=p['applied_resource_substitutions']
         snapshot['engineering_structures']=p['engineering_structures']
+        snapshot['catalog']=p['catalog']
+        snapshot['quota_adoptions']=p.get('quota_adoptions',[])
         from .scoped_rules import validate as validate_scoped
         validate_scoped(p, ruleset)
         result = calculate(p['boq'], ruleset, current_structure(p))
@@ -968,7 +988,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.18.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.19.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
@@ -1085,6 +1105,8 @@ from .document_requests import router as document_requests_router
 app.include_router(document_requests_router)
 from .quote_comparison import router as quote_comparison_router
 app.include_router(quote_comparison_router)
+from .quota_catalog import router as quota_catalog_router
+app.include_router(quota_catalog_router)
 from .delivery import router as delivery_router
 app.include_router(delivery_router)
 

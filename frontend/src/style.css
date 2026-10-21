@@ -2722,3 +2722,9 @@ input::placeholder,textarea::placeholder {
 .quantity-batch-card .wrap-cell {white-space:pre-wrap;overflow-wrap:anywhere;}
 
 .project-access-card > p {margin:0 22px 16px;}
+
+.quota-catalog-card table {table-layout:fixed;min-width:740px;}
+.quota-catalog-card td {white-space:normal;overflow-wrap:anywhere;vertical-align:top;}
+.quota-catalog-card th:nth-child(3) {width:31%;}
+.quota-catalog-card th:last-child {width:15%;}
+.quota-catalog-card td .text-btn {white-space:normal;}

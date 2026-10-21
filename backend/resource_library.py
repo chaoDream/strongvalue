@@ -90,7 +90,7 @@ def publish(pid: str, body: dict, a=Depends(core.actor)):
         if not row or row['boq_hash']!=body.get('boq_hash') or row['resource_hash']!=body.get('resource_hash'):
             raise HTTPException(409, '原资源已变化，请重新选择')
         b = core.find(p,'boq',row['boq_id']);r = row['resource']
-        if b['state']!='approved' or core.price_blockers({**p,'boq':[b]}):
+        if b['state']!='approved' or core.price_blockers({**p,'boq':[b]},p):
             raise HTTPException(409, '只能发布来源完整、价格有效的已审清单资源')
         if r.get('library_ref') or core.require_evidence(p,r['evidence_id']).get('library_origin'):
             raise HTTPException(409, '复用资源不可循环发布；请在原价格来源建立新条目')
