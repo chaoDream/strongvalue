@@ -148,7 +148,7 @@ def tables(p, q, approved):
                         c['canonical_value']+' '+c['canonical_unit'], c['rule_version'], part['evidence'][c['parameter']]]
                        for t in snapshot['takeoffs'] for part in t.get('measurement_parts', []) for c in part.get('unit_conversions', [])]
     conversion_rows.extend([[t['name'],c['parameter'],c['original_value'],c['source_unit'],c['factor'],c['canonical_value']+' '+c['canonical_unit'],c['rule_version'],t['evidence'][c['parameter']]]
-                           for t in snapshot['takeoffs'] if t.get('planar_summary') for c in t['unit_conversions']])
+                           for t in snapshot['takeoffs'] if t.get('planar_summary') or t.get('spatial_summary') for c in t['unit_conversions']])
     if conversion_rows:
         result.append(('算量原始单位换算', ['构件','分项 / 参数','原始值','原始单位','换算倍数','标准值 / 单位','单位规则版本','原始证据'], conversion_rows))
     planar=[t for t in snapshot['takeoffs'] if t.get('planar_summary')]
@@ -165,6 +165,29 @@ def tables(p, q, approved):
                        [[t['name'],s['x_from']+' → '+s['x_to'],s['width'],json.dumps(s['add_intervals']),json.dumps(s['deduct_intervals']),s['net_area']] for t in planar for s in t['planar_strips']]))
         intersections=[[t['name'],'加项' if i['operation']=='add' else '扣减',i['left'],i['right'],i['area'],'仅定位；不可相加代替并集扣重'] for t in planar for i in t['planar_intersections']]
         if intersections:result.append(('区域相交定位',['构件','加扣','区域A','区域B','两两相交面积（m²）','说明'],intersections))
+    spatial = [t for t in snapshot['takeoffs'] if t.get('spatial_summary')]
+    if spatial:
+        labels = {'naive_add_volume': '加项累加体积（含重叠）', 'add_union_volume': '加项空间并集体积', 'add_overlap_volume': '重叠扣重体积',
+                  'naive_deduct_volume': '扣减累加体积（含重叠）', 'deduct_union_volume': '扣减空间并集体积', 'deduct_overlap_volume': '重复扣减体积',
+                  'net_volume': '单组净体积', 'multiplicity': '整组重复数量'}
+        result.append(('空间并集与扣减', ['构件', '字段', '内容'],
+                       [[t['name'], label, str(t['spatial_summary'][key])+(' m³' if key.endswith('_volume') else '')] for t in spatial for key, label in labels.items()]+
+                       [[t['name'], key, value] for t in spatial for key, value in [('工程量', t['quantity']+' '+t['unit']), ('设计坐标依据', t['coordinate_basis']),
+                         ('计量依据', t['measurement_basis']), ('算法规则', t['rule_version']), ('适用边界', t['notice'])]]))
+        result.append(('长方体原始坐标', ['构件', '长方体 / 加扣', '原始XYZ与长宽高', '标准XYZ与长宽高（m）', '体积（m³）', '计量说明', '原始依据'],
+                       [[t['name'], 'B'+str(r['index'])+' / '+r['name']+' / '+('加项' if r['operation']=='add' else '扣减'),
+                         json.dumps(r['parameters'], ensure_ascii=False)+' '+r['unit'], json.dumps(r['normalized_parameters'], ensure_ascii=False),
+                         r['cuboid_volume'], r['measurement_basis'], ', '.join(sorted(set(r['evidence'].values())))] for t in spatial for r in t['spatial_regions']]))
+        result.append(('空间分层计算', ['构件', 'Z区间（m）', '层高（m）', '涉及长方体', '加项截面并集（m²）', '扣减截面并集（m²）', '净截面（m²）', '本层净体积（m³）'],
+                       [[t['name'], z['z_from']+' → '+z['z_to'], z['height'], ', '.join('B'+str(i) for i in z['region_indices']),
+                         z['add_area'], z['deduct_area'], z['net_area'], z['net_volume']] for t in spatial for z in t['spatial_layers']]))
+        result.append(('空间分层条带', ['构件', 'Z区间（m）', 'X区间（m）', '加项Y并集（m）', '扣减Y并集（m）', '条带净面积（m²）'],
+                       [[t['name'], z['z_from']+' → '+z['z_to'], r['x_from']+' → '+r['x_to'], json.dumps(r['add_intervals']), json.dumps(r['deduct_intervals']), r['net_area']]
+                        for t in spatial for z in t['spatial_layers'] for r in z['strips']]))
+        intersections = [[t['name'], '加项' if i['operation']=='add' else '扣减', i['left'], i['right'], i['volume'], '仅定位；不可相加代替并集扣重']
+                         for t in spatial for i in t['spatial_intersections']]
+        if intersections:
+            result.append(('空间相交定位', ['构件', '加扣', '长方体A', '长方体B', '两两相交体积（m³）', '说明'], intersections))
     if not q:
         from .main import blockers
         next(table[2] for table in result if table[0] == '缺项与警示').extend([[x] for x in blockers(p)])
@@ -282,7 +305,7 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if title not in ('区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
+        if title not in ('空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
@@ -338,7 +361,7 @@ def export_report(p, q, fmt, approved, template=None, table_data=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if table_data is not None or title in ('区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
+                if table_data is not None or title in ('空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)

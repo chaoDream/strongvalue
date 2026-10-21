@@ -14,6 +14,7 @@ import BoqMappingPanel from './BoqMappingPanel';
 import ResourceLibraryPanel from './ResourceLibraryPanel';
 import QuotaCatalogPanel from './QuotaCatalogPanel';
 const EnterpriseQuotaPanel=React.lazy(()=>import('./EnterpriseQuotaPanel'));
+const SpatialTakeoffPanel=React.lazy(()=>import('./SpatialTakeoffPanel'));
 const PlanarTakeoffPanel=React.lazy(()=>import('./PlanarTakeoffPanel'));
 const IntegrationTrialsPanel=React.lazy(()=>import('./IntegrationTrialsPanel'));
 const EngineeringSettlementPanel=React.lazy(()=>import('./EngineeringSettlementPanel'));
@@ -116,6 +117,7 @@ export default function EngineeringTools({section,p,user,request,refresh,onRevie
   {section==='pricing'&&<React.Suspense fallback={<p className="form-note">正在加载企业定额组成库…</p>}><EnterpriseQuotaPanel p={p} user={user} request={request} refresh={refresh}/></React.Suspense>}
   {section==='pricing'&&<QuotaCatalogPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/>}
   {section==='takeoff'&&<><div className="tool-strip"><B disabled={!editable||!p.takeoffs.length} onClick={()=>open('baseline',{basis:''})}><FileCheck2 size={15}/>导入专业底稿对账</B><B disabled={!editable||!p.documents.length} onClick={()=>open('analyze',{document_id:p.documents.find((d:Obj)=>!d.superseded)?.id||'',consent:false})}><ScanText size={15}/>模型辅助解析</B><B disabled={!editable||!p.dimension_candidates.some((x:Obj)=>x.state==='approved')} onClick={()=>open('adopt',{component_name:'',kind:'slab'})}><FileCheck2 size={15}/>采用已审尺寸</B><span className="tool-hint">{p.documents.reduce((n:number,d:Obj)=>n+(d.vector_objects?.length||0),0)} 个原始文字 / CAD 标注对象</span></div>{p.dimension_candidates.length>0&&<section className="card space-bottom"><div className="section-head"><div><h2>图纸尺寸候选与跨图冲突</h2><p>仅识别带明确单位的标注；不从像素距离推算施工尺寸</p></div></div><Grid headers={['构件','参数','标准值','原始标注 / 来源','状态','审核']}>{p.dimension_candidates.map((c:Obj)=><tr key={c.id}><td>{c.component_name||'未标注构件，需人工关联'}</td><td>{fields[c.parameter]||c.parameter}</td><td>{c.value} {c.unit}</td><td>{c.raw_text}<small className="block">{sourceLink(c.evidence_id)}</small></td><td>{status[c.state]}</td><td><button className="text-btn" onClick={()=>onReview('dimension_candidates',c)}>复核</button></td></tr>)}</Grid></section>}</>}
+  {section==='takeoff'&&<React.Suspense fallback={<p>正在读取空间构件…</p>}><SpatialTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取平面区域…</p>}><PlanarTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<CompoundTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/>}
   {section==='takeoff'&&<QuantityDiagnosisPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/>}
