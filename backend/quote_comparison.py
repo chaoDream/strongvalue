@@ -91,6 +91,18 @@ def compare_quotes(p,left,right):
                 'scope_changed':l['scope']!=r['scope'],'fees_before':l['fees'],'fees_after':r['fees'],'fee_changes':fees,
                 'left_stale':left in p['stale_quotes'],'right_stale':right in p['stale_quotes'],
                 'notice':'按清单ID关联；先按原单价计数量变化，再按新数量计单价变化，修约余额单列。单位、编码或项目特征变化全额列入口径变化；新增/移除单列。资源及费用按原始顺序位置展示，不以同名合并，也不推断专业因果。对账单不批准任一报价。'}
+        def structure(q):
+            return q['snapshot'].get('engineering_structures', [])[-1:]
+        report['engineering_structure_changed'] = store.digest(structure(l)) != store.digest(structure(r))
+        def paths(q):
+            summary=q.get('engineering_summary')
+            if summary:
+                return {v['boq_id']:v['single_name']+' / '+v['unit_name'] for v in summary['assignments']}
+            return {b['id']:'原文字分组：'+b.get('node','未标注') for b in q['lines']}
+        lp,rp=paths(l),paths(r)
+        report['engineering_assignment_changes'] = [{'boq_id':bid,'name':(new.get(bid) or old[bid])['name'],
+                                                     'before':lp.get(bid,'无'),'after':rp.get(bid,'无')}
+                                                    for bid in sorted(lp.keys()|rp.keys()) if lp.get(bid)!=rp.get(bid)] if report['engineering_structure_changed'] else []
         report['hash']=store.digest(report)
         return report
 

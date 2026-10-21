@@ -63,6 +63,8 @@ def review_batch_targets(pid: str, collection: str, a=Depends(core.actor)):
         if collection == 'quantity_diagnoses':
             from .quantity_diagnosis import latest
             objects = [x for x in objects if latest(p, x['reconciliation_id'], x['target_key'])['id']==x['id']]
+        if collection == 'engineering_structures':
+            objects = [x for x in objects if x['id'] == p['engineering_structures'][-1]['id']]
         if collection == 'pricing_bases':
             objects = [x for x in objects if x['id'] == p['pricing_bases'][-1]['id']]
         if collection == 'document_requests':

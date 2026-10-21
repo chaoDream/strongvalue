@@ -18,12 +18,12 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.16.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.17.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
                 '给排水': '管线平纵断面、材质及埋深', '电气': '配电系统及敷设方式', '合同计价': '合同、计量与取费依据'}
-REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions'}
+REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions', 'engineering_structures'}
 
 
 def password_hash(password, salt=None):
@@ -89,7 +89,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures']:
         p.setdefault(key, [])
     return p
 
@@ -144,6 +144,8 @@ def blockers(p):
     out.extend(task_issues(p))
     from .pricing_basis import issues as date_issues
     out.extend(date_issues(p))
+    from .engineering_structure import issues as structure_issues
+    out.extend(structure_issues(p))
     if any(x['state'] not in ('approved', 'rejected', 'superseded') for x in p['facts']):
         out.append('存在未审核或冲突的工程事实')
     if any(x['state'] == 'conflict' for x in p.get('dimension_candidates', [])):
@@ -715,12 +717,17 @@ def apply_review(c, p, body, a, hash_verified=False):
         raise HTTPException(409, '已取消任务须先重新开启，不能直接复核')
     if collection == 'pricing_bases' and target['id'] != p['pricing_bases'][-1]['id']:
         raise HTTPException(409, '历史日期裁决只供查阅，请复核最新版本')
+    if collection == 'engineering_structures' and target['id'] != p['engineering_structures'][-1]['id']:
+        raise HTTPException(409, '历史工程结构仅供查阅，请复核最新版本')
     if collection == 'quantity_diagnoses':
         from .quantity_diagnosis import latest
         if latest(p, target['reconciliation_id'], target['target_key'])['id'] != target['id']:
             raise HTTPException(409, '历史诊断只供查阅，请复核最新诊断版本')
     approve = body['decision'] == 'approve'
     if approve:
+        if collection == 'engineering_structures':
+            from .engineering_structure import validate
+            validate(p, target)
         if collection == 'resource_substitutions':
             from .resource_substitutions import validate
             validate(p, target)
@@ -802,6 +809,9 @@ def apply_review(c, p, body, a, hash_verified=False):
             from .workflows import validate_price_change
             validate_price_change(p, target)
         if collection == 'quotes':
+            from .engineering_structure import latest as current_structure, validate as validate_structure
+            if current_structure(p):
+                validate_structure(p, current_structure(p))
             issues = blockers(p)
             if issues or target['id'] in p['stale_quotes']:
                 raise HTTPException(409, '报告审批阻断：'+'；'.join(issues or ['输入已变更']))
@@ -830,12 +840,14 @@ def apply_review(c, p, body, a, hash_verified=False):
                 for b in p['boq']:
                     if any(r.get('price_change_id') == target['id'] for q in b['quotas'] for r in q['resources']):
                         b['state'] = 'stale'
-            if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions'):
+            if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions', 'engineering_structures'):
                 invalidate(p, 'quotes')
             else:
                 invalidate(p, collection)
         elif collection in ('takeoffs', 'boq') and all(x['state'] == 'approved' for x in p[collection]):
             p['status'] = 'TAKEOFF_APPROVED' if collection == 'takeoffs' else 'BOQ_APPROVED'
+    if collection == 'engineering_structures':
+        invalidate(p, 'quotes')
     if collection == 'document_requests':
         target.update(version=target['version']+1, updated_at=store.now())
         invalidate(p, 'quotes')
@@ -872,6 +884,12 @@ def quote(pid: str, a=Depends(actor)):
         p = project(c, pid, a)
         if not p['boq'] or any(x['state'] != 'approved' for x in p['boq']):
             raise HTTPException(409, '请先审定清单')
+        from .engineering_structure import latest as current_structure, issues as structure_issues, validate as validate_structure, rollup
+        structure_errors = structure_issues(p)
+        if structure_errors:
+            raise HTTPException(409, '；'.join(structure_errors))
+        if current_structure(p):
+            validate_structure(p, current_structure(p))
         from .pricing_basis import issues as date_issues
         date_errors = date_issues(p)
         if date_errors:
@@ -898,7 +916,11 @@ def quote(pid: str, a=Depends(actor)):
         snapshot['quantity_batches']=p['quantity_batches']
         snapshot['resource_substitutions']=p['resource_substitutions']
         snapshot['applied_resource_substitutions']=p['applied_resource_substitutions']
+        snapshot['engineering_structures']=p['engineering_structures']
         result = calculate(p['boq'], ruleset)
+        engineering_summary = rollup(p, result)
+        if engineering_summary:
+            result['engineering_summary'] = engineering_summary
         q = {'id': store.uid(), 'version': len(p['quotes'])+1, 'created_at': store.now(), 'state': 'draft',
              'input_hash': store.digest(snapshot), 'snapshot': json.loads(store.canonical(snapshot)), **result,
              'warnings': blockers(p), 'project_name': p['name'], 'scope': p['scope']}
@@ -933,7 +955,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.16.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.17.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
@@ -1020,6 +1042,8 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+from .engineering_structure import router as engineering_structure_router
+app.include_router(engineering_structure_router)
 from .resource_substitutions import router as resource_substitution_router
 app.include_router(resource_substitution_router)
 from .project_access import router as project_access_router

@@ -164,6 +164,29 @@ def tables(p, q, approved):
                        [[entry['boq_name'], entry['after']['name'], entry['before']['price'], entry['after']['price'], entry['after']['unit'],
                          entry['after']['period']+' / '+entry['after']['tax_mode'], entry['after']['source']+' / '+entry['after']['license'],
                          change['reason'], entry['after']['evidence_id']] for change in price_changes for entry in change['entries']]))
+    structures = snapshot.get('engineering_structures', [])
+    if structures:
+        structure = structures[-1]
+        nodes = {n['id']: n for n in structure['nodes']}
+        summary.extend([['工程结构版本', 'V'+str(structure['version'])+' / '+structure['state']],
+                        *[['工程划分与归属依据'+('（续）' if start else ''), structure['reason'][start:start+140]] for start in range(0,len(structure['reason']),140)], ['工程结构来源证据', structure['evidence_id']],
+                        ['项目费用归属', '项目级费用单列；不按比例分摊至单项/单位工程']])
+        result.append(('工程结构与归属', ['单项工程', '单位工程', '清单编码', '清单', '单位', '原始依据'],
+                       [[nodes.get(nodes.get(structure['assignments'].get(b['id']),{}).get('parent_id'),{}).get('name','未归属'),
+                         nodes.get(structure['assignments'].get(b['id']),{}).get('name','未归属'), b['code'], b['name'], b['unit'], structure['evidence_id']] for b in items]))
+        if not q:
+            from .engineering_structure import issues as structure_issues
+            summary.extend([['工程结构当前警示', issue] for issue in structure_issues(snapshot)])
+    engineering = q.get('engineering_summary') if q else None
+    if engineering:
+        grouped = []
+        for single in [n for n in engineering['nodes'] if n['kind']=='single']:
+            grouped.append(['单项工程',single['name'],q['project_name'],single['line_count'],single['subtotal'],'',single['subtotal']])
+            grouped.extend([['单位工程',u['name'],single['name'],u['line_count'],u['subtotal'],'',u['subtotal']]
+                           for u in engineering['nodes'] if u['parent_id']==single['id']])
+        grouped.append(['建设项目',q['project_name'],'',len(engineering['assignments']),engineering['subtotal'],engineering['project_fees'],engineering['total']])
+        result[1] = ('分级汇总', ['层级','工程名称','上级工程','清单项数','分部分项金额','项目级费用','汇总金额'],grouped)
+        summary.append(['逐级金额核对', '单位工程 → 单项工程 → 建设项目分部分项 + 项目级费用 = 报价总价；闭合'])
     substitutions = snapshot.get('resource_substitutions', [])
     if substitutions:
         states = {'draft':'待复核','approved':'已复核','rejected':'已拒绝','needs_info':'待补充'}
@@ -204,7 +227,7 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if title not in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账'): continue
+        if title not in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
@@ -227,13 +250,13 @@ def export_report(p, q, fmt, approved, template=None):
     if fmt == 'json':
         data = {'project': {'id': p['id'], 'name': p['name'], 'scope': p['scope']}, 'status': label,
                 'quote': q, 'report_reviews': [r for r in p['reviews'] if q and r['collection'] == 'quotes' and r['object_id'] == q['id']],
-                'unpriced': None if q else {k: p[k] for k in ['documents', 'evidence', 'facts', 'components', 'takeoffs', 'boq', 'reviews', 'resource_substitutions', 'applied_resource_substitutions']},
+                'unpriced': None if q else {k: p[k] for k in ['documents', 'evidence', 'facts', 'components', 'takeoffs', 'boq', 'reviews', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures']},
                 'tables': sections, 'report_template': template}
         return json.dumps(data, ensure_ascii=False, indent=2).encode(), 'application/json', 'json'
     if fmt == 'xlsx':
         wb = Workbook()
         wb.remove(wb.active)
-        numeric_headers = {'总金额', '分部分项金额', '工程量', '单价', '原单价', '新单价', '合价', '基数', '费率', '金额', '消耗', '换算系数', '资源价格', '单价贡献'}
+        numeric_headers = {'总金额', '分部分项金额', '项目级费用', '汇总金额', '工程量', '单价', '原单价', '新单价', '合价', '基数', '费率', '金额', '消耗', '换算系数', '资源价格', '单价贡献'}
         for title, headers, rows in sections:
             s = wb.create_sheet(title)
             s.append([title+' — '+label])
@@ -260,7 +283,7 @@ def export_report(p, q, fmt, approved, template=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if title in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账'):
+                if title in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)
