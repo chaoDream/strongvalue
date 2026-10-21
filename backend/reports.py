@@ -164,6 +164,18 @@ def tables(p, q, approved):
                        [[entry['boq_name'], entry['after']['name'], entry['before']['price'], entry['after']['price'], entry['after']['unit'],
                          entry['after']['period']+' / '+entry['after']['tax_mode'], entry['after']['source']+' / '+entry['after']['license'],
                          change['reason'], entry['after']['evidence_id']] for change in price_changes for entry in change['entries']]))
+    substitutions = snapshot.get('resource_substitutions', [])
+    if substitutions:
+        states = {'draft':'待复核','approved':'已复核','rejected':'已拒绝','needs_info':'待补充'}
+        result.append(('材料替换台账', ['替换单 / 清单', '状态', '替换前材料与消耗', '替换后材料与消耗', '价格 / 归属', '替换原因 / 来源 / 授权', '原始依据', '提交时条件性试算'],
+                       [[s['name']+' / '+s['boq_name'], states[s['state']]+(' / 已应用' if s['id'] in snapshot.get('applied_resource_substitutions',[]) else ''),
+                         s['before']['name']+' / '+str(s['before']['consumption'])+' '+s['before']['unit'],
+                         str(i+1)+'. '+r['resource_code']+' / '+r['name']+' / '+r['specification']+' / '+str(r['consumption'])+' '+r['unit'],
+                         ('待询价' if r.get('pricing_status')=='unpriced' else str(r['price'])+' / '+r['source_type']+' / '+r['period']+' / '+r['tax_mode'])+'；'+r['fee_allocation'],
+                         s['reason']+' / '+s['source']+' / '+s['license'],
+                         s['evidence_id']+' / 原材料 '+s['before']['evidence_id']+' / 新材料 '+r['evidence_id'],
+                         (s['impact']['before_total']+' → '+s['impact']['after_total']+' / 差额 '+s['impact']['delta']+'；'+s['impact']['notice']) if s['impact']['available'] else s['impact']['notice']]
+                        for s in substitutions for i,r in enumerate(s['after'])]))
     mapped = [b for b in items if b.get('mapping_ref')]
     if mapped:
         result.append(('清单编码映射依据', ['清单编码','名称','标准','版本','专业','映射版本校验值','来源证据'],
@@ -192,7 +204,7 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if title not in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务'): continue
+        if title not in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
@@ -215,7 +227,7 @@ def export_report(p, q, fmt, approved, template=None):
     if fmt == 'json':
         data = {'project': {'id': p['id'], 'name': p['name'], 'scope': p['scope']}, 'status': label,
                 'quote': q, 'report_reviews': [r for r in p['reviews'] if q and r['collection'] == 'quotes' and r['object_id'] == q['id']],
-                'unpriced': None if q else {k: p[k] for k in ['documents', 'evidence', 'facts', 'components', 'takeoffs', 'boq', 'reviews']},
+                'unpriced': None if q else {k: p[k] for k in ['documents', 'evidence', 'facts', 'components', 'takeoffs', 'boq', 'reviews', 'resource_substitutions', 'applied_resource_substitutions']},
                 'tables': sections, 'report_template': template}
         return json.dumps(data, ensure_ascii=False, indent=2).encode(), 'application/json', 'json'
     if fmt == 'xlsx':
@@ -248,7 +260,7 @@ def export_report(p, q, fmt, approved, template=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if title in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务'):
+                if title in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)

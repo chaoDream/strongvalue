@@ -18,12 +18,12 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.15.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.16.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
                 '给排水': '管线平纵断面、材质及埋深', '电气': '配电系统及敷设方式', '合同计价': '合同、计量与取费依据'}
-REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses'}
+REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions'}
 
 
 def password_hash(password, salt=None):
@@ -89,7 +89,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions']:
         p.setdefault(key, [])
     return p
 
@@ -227,6 +227,8 @@ def price_blockers(p):
     if len(tax_modes) > 1:
         out.append('资源含税与不含税价格混用；请按计价规则统一口径')
     out.extend(reference_errors(p))
+    from .resource_substitutions import reference_errors as substitution_errors
+    out.extend(substitution_errors(p))
     return out
 
 
@@ -719,6 +721,9 @@ def apply_review(c, p, body, a, hash_verified=False):
             raise HTTPException(409, '历史诊断只供查阅，请复核最新诊断版本')
     approve = body['decision'] == 'approve'
     if approve:
+        if collection == 'resource_substitutions':
+            from .resource_substitutions import validate
+            validate(p, target)
         if collection == 'quantity_diagnoses':
             from .quantity_diagnosis import validate
             validate(p, target)
@@ -758,6 +763,10 @@ def apply_review(c, p, body, a, hash_verified=False):
                 if 'conversion' in quota:
                     quota_conversion(quota)
                     require_evidence(p, quota['conversion']['evidence_id'])
+            from .resource_substitutions import reference_errors as substitution_errors
+            substitution_issues = substitution_errors({**p, 'boq': [target]})
+            if substitution_issues:
+                raise HTTPException(409, '；'.join(substitution_issues))
             from .extensions import validate_links
             validate_links(p, target)
             from .boq_mapping import mapping_issues
@@ -813,11 +822,15 @@ def apply_review(c, p, body, a, hash_verified=False):
             if collection == 'boq_mappings':
                 from .boq_mapping import invalidate_dependents
                 invalidate_dependents(p, {target['id']})
+            if collection == 'resource_substitutions':
+                for b in p['boq']:
+                    if any(r.get('substitution_id') == target['id'] for q in b['quotas'] for r in q['resources']):
+                        b['state'] = 'stale'
             if collection == 'price_changes':
                 for b in p['boq']:
                     if any(r.get('price_change_id') == target['id'] for q in b['quotas'] for r in q['resources']):
                         b['state'] = 'stale'
-            if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses'):
+            if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions'):
                 invalidate(p, 'quotes')
             else:
                 invalidate(p, collection)
@@ -883,6 +896,8 @@ def quote(pid: str, a=Depends(actor)):
         snapshot['pricing_bases']=p['pricing_bases']
         snapshot['quantity_diagnoses']=p['quantity_diagnoses']
         snapshot['quantity_batches']=p['quantity_batches']
+        snapshot['resource_substitutions']=p['resource_substitutions']
+        snapshot['applied_resource_substitutions']=p['applied_resource_substitutions']
         result = calculate(p['boq'], ruleset)
         q = {'id': store.uid(), 'version': len(p['quotes'])+1, 'created_at': store.now(), 'state': 'draft',
              'input_hash': store.digest(snapshot), 'snapshot': json.loads(store.canonical(snapshot)), **result,
@@ -918,7 +933,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.15.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.16.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
@@ -1005,6 +1020,8 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+from .resource_substitutions import router as resource_substitution_router
+app.include_router(resource_substitution_router)
 from .project_access import router as project_access_router
 app.include_router(project_access_router)
 from .quantity_batches import router as quantity_batch_router
