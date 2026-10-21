@@ -2720,3 +2720,5 @@ input::placeholder,textarea::placeholder {
 .quantity-batch-card > .review-details {margin:16px 22px 22px;color:#253831;font-size:12px;line-height:1.7;}
 .quantity-batch-card .review-details > p {margin:12px 0;}
 .quantity-batch-card .wrap-cell {white-space:pre-wrap;overflow-wrap:anywhere;}
+
+.project-access-card > p {margin:0 22px 16px;}

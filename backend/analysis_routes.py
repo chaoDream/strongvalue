@@ -16,7 +16,7 @@ def analyze_job(pid, did, jid, actor):
     if token is None:return
     try:
         with store.transaction() as c:
-            p = core.project(c, pid, actor)
+            p = core.task_project(c, pid, actor)
             job = core.find(p, 'jobs', jid)
             if not current(job,token):return
             doc = core.find(p, 'documents', did)
@@ -27,7 +27,7 @@ def analyze_job(pid, did, jid, actor):
             store.save(c, p)
         result = gateway.request_gateway(doc, original_bytes(doc), evidence)
         with store.transaction() as c:
-            p = core.project(c, pid, actor)
+            p = core.task_project(c, pid, actor)
             current_doc = core.find(p, 'documents', did)
             job = core.find(p, 'jobs', jid)
             if not current(job,token):return

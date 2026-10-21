@@ -23,6 +23,9 @@ def source_project(c, entry, tenant):
     if not row:
         raise HTTPException(409, '价格原项目不可用')
     p = core.normalize(json.loads(row['data']))
+    from .project_access import config
+    if config(p)['mode']=='restricted':
+        raise HTTPException(409, '受限项目不能作为企业共享价格及原件的来源')
     source = next((r for r in resources(p) if r['key']==entry['source_key']), None)
     b = next((b for b in p['boq'] if b['id']==entry['source_boq_id']), None)
     if not source or not b or b['state']!='approved' or source['boq_hash']!=entry['source_boq_hash'] or source['resource_hash']!=entry['source_resource_hash']:
@@ -56,7 +59,12 @@ def list_entries(q: str='', offset: int=0, a=Depends(core.actor)):
         raise HTTPException(422, '检索内容或分页参数无效')
     with store.connect() as c:
         entries = [json.loads(row['data']) for row in c.execute('SELECT data FROM organization_resources WHERE tenant=? ORDER BY rowid DESC',(a['tenant'],))]
-        entries = [e for e in entries if q.casefold() in (e['resource']['name']+' '+e['resource'].get('specification','')+' '+e['resource']['period']+' '+e['source_project_name']).casefold()]
+        from .project_access import allowed
+        visible=[]
+        for entry in entries:
+            row=c.execute('SELECT data FROM projects WHERE id=? AND tenant=?',(entry['source_project_id'],a['tenant'])).fetchone()
+            if row and allowed(json.loads(row['data']),a): visible.append(entry)
+        entries = [e for e in visible if q.casefold() in (e['resource']['name']+' '+e['resource'].get('specification','')+' '+e['resource']['period']+' '+e['source_project_name']).casefold()]
         result = []
         for entry in entries[offset:offset+100]:
             try:
@@ -75,6 +83,9 @@ def publish(pid: str, body: dict, a=Depends(core.actor)):
         raise HTTPException(422, '须填写允许在本企业其他项目复用的授权范围及条件')
     with store.transaction() as c:
         p = core.project(c,pid,a)
+        from .project_access import config
+        if config(p)['mode']=='restricted':
+            raise HTTPException(409, '受限项目禁止向企业价格库发布原件或价格')
         row = next((r for r in resources(p) if r['key']==body.get('key')),None)
         if not row or row['boq_hash']!=body.get('boq_hash') or row['resource_hash']!=body.get('resource_hash'):
             raise HTTPException(409, '原资源已变化，请重新选择')
@@ -112,6 +123,7 @@ def review_entry(eid: str, body: dict, a=Depends(core.actor)):
         raise HTTPException(422, '须填写审核决定及许可核查依据')
     with store.transaction() as c:
         entry = get_entry(c,eid,a['tenant'])
+        core.project(c,entry['source_project_id'],a)
         if store.digest(entry)!=body.get('object_hash'):
             raise HTTPException(409, '价格条目已变化，请重新核对')
         if body['decision']=='approve':
@@ -152,6 +164,7 @@ def propose_from_library(pid: str, eid: str, body: dict, a=Depends(core.actor)):
         raise HTTPException(422, '须明确核对复用授权、材质规格、税制及本项目适用条件')
     with store.transaction() as c:
         p = core.project(c,pid,a);entry = get_entry(c,eid,a['tenant'])
+        core.project(c,entry['source_project_id'],a)
         if entry['state']!='approved' or store.digest(entry)!=body.get('object_hash'):
             raise HTTPException(409, '企业价格尚未审定或已发生变化')
         source = validate_entry(c,entry,a['tenant'],p)

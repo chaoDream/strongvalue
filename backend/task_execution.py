@@ -26,7 +26,7 @@ def validate_model(p,doc,job):
 def claim(pid,did,jid,actor):
     from . import main as core
     with store.transaction() as c:
-        p=core.project(c,pid,actor);job=core.find(p,'jobs',jid)
+        p=core.task_project(c,pid,actor);job=core.find(p,'jobs',jid)
         if job['document_id']!=did or job['state']!='queued':return None
         token=store.uid()
         job.update(state='running',execution_id=token,attempts=job.get('attempts',0)+1,started_at=store.now(),finished_at=None,message='正在核对原件及处理输入')
@@ -57,7 +57,7 @@ def original_bytes(doc):
 def fail(pid,did,jid,actor,token,exc,model=False):
     from . import main as core
     with store.transaction() as c:
-        p=core.project(c,pid,actor);job=core.find(p,'jobs',jid)
+        p=core.task_project(c,pid,actor);job=core.find(p,'jobs',jid)
         if not current(job,token):return
         message=str(getattr(exc,'detail',exc))[:300]
         job.update(state='failed',message=message,finished_at=store.now())

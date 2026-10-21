@@ -18,7 +18,7 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.12.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.13.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -59,7 +59,11 @@ def actor(request: Request):
                          (hashlib.sha256(token.encode()).hexdigest(), store.now())).fetchone()
     if not user:
         raise HTTPException(401, '请先登录')
-    return {key:user[key] for key in ['id', 'tenant', 'username', 'role', 'active']}
+    a={key:user[key] for key in ['id', 'tenant', 'username', 'role', 'active']}
+    from .project_access import denial_context
+    scope=denial_context.get()
+    if scope is not None: scope['actor']=a
+    return a
 
 
 def edit(a):
@@ -67,11 +71,21 @@ def edit(a):
         raise HTTPException(403, '当前角色只能复核，不能修改编制数据')
 
 
-def project(c, pid, a):
+def task_project(c, pid, a):
+    """Tenant-bound service work; request handlers must use project()."""
     row = c.execute('SELECT data FROM projects WHERE id=? AND tenant=?', (pid, a['tenant'])).fetchone()
     if not row:
         raise HTTPException(404, '项目不存在或无权访问')
     return normalize(json.loads(row['data']))
+
+
+def project(c, pid, a):
+    from .project_access import allowed, denied
+    p = task_project(c,pid,a)
+    if not allowed(p,a):
+        denied(pid)
+        raise HTTPException(404, '项目不存在或无权访问')
+    return p
 
 
 def normalize(p):
@@ -266,7 +280,8 @@ def create_project(body: ProjectIn, a=Depends(actor)):
 def projects(a=Depends(actor)):
     with store.connect() as c:
         rows = c.execute('SELECT data FROM projects WHERE tenant=?', (a['tenant'],)).fetchall()
-    return [view(json.loads(r['data'])) for r in rows][::-1]
+    from .project_access import allowed
+    return [view(p) for p in (json.loads(r['data']) for r in reversed(rows)) if allowed(p,a)]
 
 
 @app.get('/api/v1/projects/{pid}')
@@ -281,7 +296,7 @@ def parse_job(pid, did, jid, a):
     if token is None:return
     try:
         with store.transaction() as c:
-            p = project(c, pid, a)
+            p = task_project(c, pid, a)
             d = find(p, 'documents', did)
             job=find(p,'jobs',jid)
             if not current(job,token):return
@@ -297,7 +312,7 @@ def parse_job(pid, did, jid, a):
         pages = extract(Path(d['name']).suffix.lower(), raw)
         vector_objects = pdf_text_anchors(raw) if d['name'].lower().endswith('.pdf') else dxf_objects(raw)[0] if d['name'].lower().endswith('.dxf') else []
         with store.transaction() as c:
-            p = project(c, pid, a)
+            p = task_project(c, pid, a)
             d = find(p, 'documents', did)
             job=find(p,'jobs',jid)
             if not current(job,token):return
@@ -866,7 +881,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.12.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.13.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
@@ -935,7 +950,14 @@ async def security_headers(request: Request, call_next):
         from urllib.parse import urlsplit
         if urlsplit(origin).netloc != request.headers.get('host'):
             return JSONResponse(status_code=403, content={'detail': '拒绝跨站写入'})
-    response = await call_next(request)
+    from .project_access import denial_context,audit_denials
+    scope={'actor':None,'projects':set()}
+    token=denial_context.set(scope)
+    try:
+        response = await call_next(request)
+    finally:
+        denial_context.reset(token)
+    audit_denials(scope,request.method,request.url.path)
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'same-origin'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
@@ -944,6 +966,8 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+from .project_access import router as project_access_router
+app.include_router(project_access_router)
 from .quantity_batches import router as quantity_batch_router
 app.include_router(quantity_batch_router)
 from .quantity_diagnosis import router as quantity_diagnosis_router
