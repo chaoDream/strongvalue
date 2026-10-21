@@ -121,6 +121,9 @@ def tables(p, q, approved):
     if not q:
         from .main import blockers
         result[-1][2].extend([[x] for x in blockers(p)])
+    if snapshot.get('document_requests'):
+        result.append(('补件任务台账', ['任务', '专业', '负责人', '期限', '状态', '未关闭时阻断本次范围', '缺项说明', '补充说明', '证据'],
+                       [[t['name'], t['specialty'], t['assignee'], t['due_date'], t['state'], '是' if t['blocking'] and t['specialty'] in (q['scope'] if q else p['scope']) else '否', t['detail'], (t['submissions'][-1]['note'] if t['submissions'] else ''), ', '.join(t['evidence_ids'])] for t in snapshot['document_requests']]))
     changes = [x for x in snapshot.get('changes', []) if x['id'] in snapshot.get('applied_changes', [])]
     if changes:
         result.append(('变更签证台账', ['清单', '原工程量', '变更后', '增减量', '单位', '原因及依据', '来源证据'],

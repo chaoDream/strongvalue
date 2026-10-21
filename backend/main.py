@@ -18,12 +18,12 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.5.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.6.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
                 '给排水': '管线平纵断面、材质及埋深', '电气': '配电系统及敷设方式', '合同计价': '合同、计量与取费依据'}
-REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings'}
+REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests'}
 
 
 def password_hash(password, salt=None):
@@ -75,7 +75,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests']:
         p.setdefault(key, [])
     return p
 
@@ -126,6 +126,8 @@ def blockers(p):
     out = [x['specialty']+'资料尚未复核完整' for x in gaps(p) if x['blocking']]
     out.extend(x['message'] for x in allocation_diagnostics(p)['issues'] if x['blocking'])
     out.extend(mapping_issues(p))
+    from .document_requests import task_issues
+    out.extend(task_issues(p))
     if any(x['state'] not in ('approved', 'rejected', 'superseded') for x in p['facts']):
         out.append('存在未审核或冲突的工程事实')
     if any(x['state'] == 'conflict' for x in p.get('dimension_candidates', [])):
@@ -195,7 +197,8 @@ def price_blockers(p):
 
 def view(p):
     normalize(p)
-    return {**p, 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities()}
+    from .document_requests import source_issues
+    return {**p, 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities(), 'document_request_source_issues': source_issues(p)}
 
 
 class Login(BaseModel):
@@ -644,8 +647,15 @@ def apply_review(c, p, body, a, hash_verified=False):
         raise HTTPException(404, '审核对象不存在')
     if not hash_verified and body.get('object_hash') != store.digest(target):
         raise HTTPException(409, '对象已变更，请刷新后重新复核')
+    if collection == 'document_requests' and target['state'] == 'cancelled':
+        raise HTTPException(409, '已取消任务须先重新开启，不能直接复核')
     approve = body['decision'] == 'approve'
     if approve:
+        if collection == 'document_requests':
+            from .document_requests import validate_submission
+            if target['state'] not in ('submitted', 'approved'):
+                raise HTTPException(409, '补件任务须先提交补充依据再复核关闭')
+            validate_submission(p, target)
         if collection == 'facts':
             if any(f['key'] == target['key'] and f['value'] != target['value'] and f['state'] not in ('rejected','superseded') for f in p['facts']):
                 raise HTTPException(409, '先拒绝冲突候选，再核准选定值')
@@ -728,12 +738,15 @@ def apply_review(c, p, body, a, hash_verified=False):
                 for b in p['boq']:
                     if any(r.get('price_change_id') == target['id'] for q in b['quotas'] for r in q['resources']):
                         b['state'] = 'stale'
-            if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings'):
+            if collection in ('coverage', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests'):
                 invalidate(p, 'quotes')
             else:
                 invalidate(p, collection)
         elif collection in ('takeoffs', 'boq') and all(x['state'] == 'approved' for x in p[collection]):
             p['status'] = 'TAKEOFF_APPROVED' if collection == 'takeoffs' else 'BOQ_APPROVED'
+    if collection == 'document_requests':
+        target.update(version=target['version']+1, updated_at=store.now())
+        invalidate(p, 'quotes')
     store.audit(c, p, a, 'REVIEW_DECISION', record)
     return record
 
@@ -777,6 +790,7 @@ def quote(pid: str, a=Depends(actor)):
         snapshot.update(price_changes=p['price_changes'], applied_price_changes=p['applied_price_changes'])
         snapshot.update(boq_mappings=p['boq_mappings'], boq_standard=p.get('boq_standard',''), boq_edition=p.get('boq_edition',''))
         snapshot['library_snapshots']=p['library_snapshots']
+        snapshot['document_requests']=p['document_requests']
         result = calculate(p['boq'], ruleset)
         q = {'id': store.uid(), 'version': len(p['quotes'])+1, 'created_at': store.now(), 'state': 'draft',
              'input_hash': store.digest(snapshot), 'snapshot': json.loads(store.canonical(snapshot)), **result,
@@ -810,7 +824,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.5.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.6.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
@@ -902,6 +916,8 @@ from .boq_mapping import router as boq_mapping_router
 app.include_router(boq_mapping_router)
 from .resource_library import router as resource_library_router
 app.include_router(resource_library_router)
+from .document_requests import router as document_requests_router
+app.include_router(document_requests_router)
 from .delivery import router as delivery_router
 app.include_router(delivery_router)
 
