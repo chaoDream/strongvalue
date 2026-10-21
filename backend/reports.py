@@ -158,6 +158,28 @@ def tables(p, q, approved):
                                          saved['reuse_basis'],saved['resource']['period'],ref['hash'],resource['evidence_id'],ref['reuse_evidence_id']])
     if library_rows:
         result.append(('企业价格复用依据',['清单','资源','采用单价','原项目','复用授权范围','期次','企业条目校验值','价格依据','复用许可依据'],library_rows))
+    if snapshot.get('quantity_diagnoses'):
+        from .quantity_diagnosis import CATEGORIES
+        from .reconciliation import context_hash
+        report_context = context_hash(snapshot)
+        states = {'draft':'待复核','approved':'诊断已复核','rejected':'诊断已拒绝','needs_info':'待补充','stale':'已失效'}
+        result.append(('工程量差异诊断', ['构件 / 底稿行','类别 / 版本 / 状态','对账记录值','系统侧记录','人工基准记录','分析及处理建议','原始依据'],
+                       [[d['target']['name']+' / '+d['target_key'], CATEGORIES[d['category']]+' / V'+str(d['version'])+' / '+states.get(d['state'],d['state'])+(' / 历史计算口径' if d['context_hash']!=report_context else ''),
+                         ('系统 '+d['target']['quantity']+' '+d['target']['unit']+'；底稿未覆盖' if d['target']['kind']=='missing_takeoff' else '系统 '+d['target'].get('actual','未匹配')+' / 基准 '+d['target']['expected']+' '+d['target']['unit']+' / 差量 '+d['target'].get('delta','无法计算')+' / 允许 '+d['target'].get('allowed_delta','无法计算')),
+                         d['observed'], d['reference'], d['reason']+'；处理：'+d['action']+'；诊断不改变容差及数量对照结论',
+                         d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
+    # Long analyses must remain printable in Excel's bounded row height.
+    for i,(title,headers,rows) in enumerate(result):
+        if title != '工程量差异诊断': continue
+        expanded = []
+        for row in rows:
+            cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
+            count = max((len(v)+139)//140 for v in cells)
+            for part in range(count):
+                segment = [v[part*140:(part+1)*140] for v in cells]
+                if part: segment[0] = cells[0]+'（续'+str(part+1)+'）'
+                expanded.append(segment)
+        result[i] = (title,headers,expanded)
     return watermark, result
 
 
@@ -203,6 +225,11 @@ def export_report(p, q, fmt, approved, template=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
+                if title == '工程量差异诊断':
+                    import math, unicodedata
+                    width = min(55,max(15,110/len(headers)))-2
+                    lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)
+                    s.row_dimensions[row[0].row].height = min(409,max(48,lines*14+10))
             for col in s.columns:
                 s.column_dimensions[col[1].column_letter].width = min(55, max(15, 110/len(headers)))
             s.freeze_panes = 'A3'

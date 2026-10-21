@@ -18,6 +18,14 @@ def quantity_hash(p):
                           'measurement_basis':t['measurement_basis']} for t in p['takeoffs']])
 
 
+def context_hash(p):
+    return store.digest([{k:v for k,v in t.items() if k != 'state'} for t in p['takeoffs']])
+
+
+def matches_context(p, record):
+    return record['input_hash']==quantity_hash(p) and (not record.get('calculation_hash') or record['calculation_hash']==context_hash(p))
+
+
 def baseline_rows(filename, raw):
     if Path(filename).suffix.lower() == '.xlsx':
         validate_file('.xlsx', raw)
@@ -87,7 +95,7 @@ async def reconcile(pid:str, file:UploadFile=File(...), basis:str=Form(...), a=D
         p['documents'].append(doc)
         e={'id':store.uid(),'document_id':doc['id'],'document_hash':sha,'page':None,'text':basis,'method':'independent_baseline','bbox':None}
         p['evidence'].append(e)
-        record={'id':store.uid(),'name':doc['name'],'input_hash':quantity_hash(p),'evidence_id':e['id'],'basis':basis,'rows':results,
+        record={'id':store.uid(),'name':doc['name'],'input_hash':quantity_hash(p),'calculation_hash':context_hash(p),'evidence_id':e['id'],'basis':basis,'rows':results,
                 'missing_takeoffs':missing,'passed':not missing and all(r['passed'] for r in results),'state':'draft','created_at':store.now()}
         p['reconciliations'].append(record)
         core.invalidate(p,'quotes')

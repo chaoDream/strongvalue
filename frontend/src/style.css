@@ -2711,3 +2711,7 @@ input::placeholder,textarea::placeholder {
 .pricing-basis-card .review-details > p {
   margin:12px 0;
 }
+
+.diagnosis-card > p { margin:0 22px 16px; }
+.diagnosis-card > .review-details { margin:16px 22px 22px; color:#253831; font-size:12px; line-height:1.7; }
+.diagnosis-card .review-details p { margin:10px 0; overflow-wrap:anywhere; white-space:pre-wrap; }
