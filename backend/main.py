@@ -18,7 +18,7 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.4.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.5.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -810,7 +810,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.4.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.5.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
@@ -822,7 +822,11 @@ def export(pid: str, format: str = 'json', quote_id: str = '', template_id: str 
         approved = bool(q and p['report_approval'] and p['report_approval']['quote_id'] == q['id'] and q['id'] not in p['stale_quotes'] and not blockers(p))
         from .templates import find_template
         template = find_template(c, template_id, a['tenant']) if template_id else None
-        payload, media, suffix = export_report(p, q, format, approved, template)
+        if format == 'zip':
+            from .delivery import export_bundle
+            payload, media, suffix = export_bundle(c, p, q, template)
+        else:
+            payload, media, suffix = export_report(p, q, format, approved, template)
         sha = hashlib.sha256(payload).hexdigest()
         directory = store.ROOT/'exports'
         directory.mkdir(exist_ok=True)
@@ -853,7 +857,15 @@ def artifact_file(pid: str, aid: str, inline: bool = False, a=Depends(actor)):
         if not row:
             raise HTTPException(404, '成果文件不存在或无权访问')
         artifact = json.loads(row['data'])
-    return FileResponse(store.ROOT/'exports'/artifact['hash'], media_type=artifact['media'],
+    from .delivery import file_digest
+    path = store.ROOT/'exports'/artifact['hash']
+    try:
+        intact = file_digest(path) == artifact['hash']
+    except OSError:
+        intact = False
+    if not intact:
+        raise HTTPException(409, '历史导出件缺失或内容哈希不一致，请恢复原件后下载')
+    return FileResponse(path, media_type=artifact['media'],
                         filename='QiangQuote-'+aid[:8]+'.'+artifact['suffix'],
                         content_disposition_type='inline' if inline and artifact['format'] == 'pdf' else 'attachment',
                         headers={'X-Artifact-Hash': artifact['hash']})
@@ -890,6 +902,8 @@ from .boq_mapping import router as boq_mapping_router
 app.include_router(boq_mapping_router)
 from .resource_library import router as resource_library_router
 app.include_router(resource_library_router)
+from .delivery import router as delivery_router
+app.include_router(delivery_router)
 
 dist = Path(__file__).parent.parent/'frontend'/'dist'
 if dist.exists():
