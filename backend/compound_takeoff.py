@@ -131,6 +131,9 @@ def validate(p, comp, saved=False):
 
 
 def structured_validator(kind):
+    if kind == 'surface_faces':
+        from .surface_takeoff import validate as validate_surface
+        return validate_surface
     if kind == 'spatial_regions':
         from .spatial_takeoff import validate as validate_spatial
         return validate_spatial
@@ -141,6 +144,9 @@ def structured_validator(kind):
 
 
 def component_quantity(comp):
+    if comp['kind'] == 'surface_faces':
+        from .surface_takeoff import calculate as calculate_surface
+        return calculate_surface(comp)
     if comp['kind'] == 'spatial_regions':
         from .spatial_takeoff import calculate as calculate_spatial
         return calculate_spatial(comp)
