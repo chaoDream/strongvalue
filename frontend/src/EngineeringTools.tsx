@@ -14,6 +14,7 @@ import BoqMappingPanel from './BoqMappingPanel';
 import ResourceLibraryPanel from './ResourceLibraryPanel';
 import QuotaCatalogPanel from './QuotaCatalogPanel';
 const EnterpriseQuotaPanel=React.lazy(()=>import('./EnterpriseQuotaPanel'));
+const IntegrationTrialsPanel=React.lazy(()=>import('./IntegrationTrialsPanel'));
 const EngineeringSettlementPanel=React.lazy(()=>import('./EngineeringSettlementPanel'));
 import PdfPreview from './DocumentPreview';
 
@@ -101,6 +102,7 @@ export default function EngineeringTools({section,p,user,request,refresh,onRevie
  }
 
  return <div className="engineering-tools">
+  {section==='settings'&&<React.Suspense fallback={<p className="form-note">正在读取往返试验记录…</p>}><IntegrationTrialsPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   <WorkflowPanel section={section} p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink} reviewDetails={reviewDetails}/>
   {section==='boq'&&<QuantityBatchPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/>}
   {section==='boq'&&<BoqMappingPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/>}

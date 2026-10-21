@@ -1,8 +1,8 @@
 # 强·报价 QiangQuote
 
-基于《融合版完整 PRD V3.0》的本地全栈工程。当前交付为 **0.22 受控工程工作台**：在0.21基础上增加分项合计与逐项扣减算量、尺寸/数量/计量依据追溯及结构化计算书，接入独立复核、清单和版本留档。
+基于《融合版完整 PRD V3.0》的本地全栈工程。当前交付为 **0.23 受控工程工作台**：在0.22基础上增加专业软件往返验证台账，逐字段对照保留、丢失、单位与量值变化，记录软件版本、许可、运行依据及独立复核，支持单独留档。
 
-本版功能与验收边界见 [0.22功能说明](docs/RELEASE-0.22.md)，前版能力见 [0.21功能说明](docs/RELEASE-0.21.md)、 [0.20功能说明](docs/RELEASE-0.20.md)、 [0.19功能说明](docs/RELEASE-0.19.md)、 [0.18功能说明](docs/RELEASE-0.18.md)、 [0.17功能说明](docs/RELEASE-0.17.md)、 [0.16功能说明](docs/RELEASE-0.16.md)、 [0.15功能说明](docs/RELEASE-0.15.md)、 [0.14功能说明](docs/RELEASE-0.14.md)、 [0.13功能说明](docs/RELEASE-0.13.md)、 [0.12功能说明](docs/RELEASE-0.12.md)、 [0.11功能说明](docs/RELEASE-0.11.md)、 [0.10功能说明](docs/RELEASE-0.10.md)、 [0.9功能说明](docs/RELEASE-0.9.md)、 [0.8功能说明](docs/RELEASE-0.8.md)、 [0.7功能说明](docs/RELEASE-0.7.md)、 [0.6功能说明](docs/RELEASE-0.6.md)、 [0.5功能说明](docs/RELEASE-0.5.md)、 [0.4功能说明](docs/RELEASE-0.4.md)、 [0.3功能说明](docs/RELEASE-0.3.md)及 [0.2功能说明](docs/RELEASE-0.2.md)，模型配置见 [模型接入文档](docs/MODEL-GATEWAY.md)。
+本版功能与验收边界见 [0.23功能说明](docs/RELEASE-0.23.md)，前版能力见 [0.22功能说明](docs/RELEASE-0.22.md)、 [0.21功能说明](docs/RELEASE-0.21.md)、 [0.20功能说明](docs/RELEASE-0.20.md)、 [0.19功能说明](docs/RELEASE-0.19.md)、 [0.18功能说明](docs/RELEASE-0.18.md)、 [0.17功能说明](docs/RELEASE-0.17.md)、 [0.16功能说明](docs/RELEASE-0.16.md)、 [0.15功能说明](docs/RELEASE-0.15.md)、 [0.14功能说明](docs/RELEASE-0.14.md)、 [0.13功能说明](docs/RELEASE-0.13.md)、 [0.12功能说明](docs/RELEASE-0.12.md)、 [0.11功能说明](docs/RELEASE-0.11.md)、 [0.10功能说明](docs/RELEASE-0.10.md)、 [0.9功能说明](docs/RELEASE-0.9.md)、 [0.8功能说明](docs/RELEASE-0.8.md)、 [0.7功能说明](docs/RELEASE-0.7.md)、 [0.6功能说明](docs/RELEASE-0.6.md)、 [0.5功能说明](docs/RELEASE-0.5.md)、 [0.4功能说明](docs/RELEASE-0.4.md)、 [0.3功能说明](docs/RELEASE-0.3.md)及 [0.2功能说明](docs/RELEASE-0.2.md)，模型配置见 [模型接入文档](docs/MODEL-GATEWAY.md)。
 
 数据库迁移副本、已有导出文件及离线依赖分卷见 `transfer/local-snapshot/`；恢复步骤与独立密钥接口见 [迁移及密钥说明](docs/TRANSFER-AND-SECRETS.md)。
 
@@ -104,10 +104,10 @@ data/           运行数据（不入版本库）
 提供 Dockerfile；镜像构建与容器运行尚未在当前环境执行验证：
 
 ```sh
-docker build -t qiangquote:0.22 .
-docker run --rm -p 127.0.0.1:8000:8000 -v qiang-data:/app/data qiangquote:0.22
+docker build -t qiangquote:0.23 .
+docker run --rm -p 127.0.0.1:8000:8000 -v qiang-data:/app/data qiangquote:0.23
 ```
 
 停止服务后整体备份 `data/`，包括 SQLite 数据库、WAL/SHM（如存在）、原始文件与导出文件。恢复时整体恢复同一备份。不要只复制数据库而遗漏原件。默认存储为本地 SQLite，JSON 聚合模型适合试点；PostgreSQL NUMERIC/JSONB、S3 私有对象仓库、Redis/隔离 worker、企业 SSO、速率限制、恶意文件扫描与集中监控属于生产化后续任务，不能把当前本地版本直接认定为 SaaS 商用部署。
 
-当前实现范围见 [0.22功能说明](docs/RELEASE-0.22.md)、[0.21功能说明](docs/RELEASE-0.21.md)、[0.20功能说明](docs/RELEASE-0.20.md)、[0.19功能说明](docs/RELEASE-0.19.md)、[0.18功能说明](docs/RELEASE-0.18.md)、[0.17功能说明](docs/RELEASE-0.17.md)、[0.16功能说明](docs/RELEASE-0.16.md)、[0.15功能说明](docs/RELEASE-0.15.md)、[0.14功能说明](docs/RELEASE-0.14.md)、[0.13功能说明](docs/RELEASE-0.13.md)、[0.12功能说明](docs/RELEASE-0.12.md)、[0.11功能说明](docs/RELEASE-0.11.md)、[0.10功能说明](docs/RELEASE-0.10.md)、[0.9功能说明](docs/RELEASE-0.9.md)、[0.8功能说明](docs/RELEASE-0.8.md)、[0.7功能说明](docs/RELEASE-0.7.md)、[0.6功能说明](docs/RELEASE-0.6.md)、[0.5功能说明](docs/RELEASE-0.5.md)、[0.4功能说明](docs/RELEASE-0.4.md)、[0.3功能说明](docs/RELEASE-0.3.md)及[0.2功能说明](docs/RELEASE-0.2.md)，0.1设计历史见 [原实施记录](docs/IMPLEMENTATION.md)，验证结果见 [QA](docs/QA.md)。
+当前实现范围见 [0.23功能说明](docs/RELEASE-0.23.md)、[0.22功能说明](docs/RELEASE-0.22.md)、[0.21功能说明](docs/RELEASE-0.21.md)、[0.20功能说明](docs/RELEASE-0.20.md)、[0.19功能说明](docs/RELEASE-0.19.md)、[0.18功能说明](docs/RELEASE-0.18.md)、[0.17功能说明](docs/RELEASE-0.17.md)、[0.16功能说明](docs/RELEASE-0.16.md)、[0.15功能说明](docs/RELEASE-0.15.md)、[0.14功能说明](docs/RELEASE-0.14.md)、[0.13功能说明](docs/RELEASE-0.13.md)、[0.12功能说明](docs/RELEASE-0.12.md)、[0.11功能说明](docs/RELEASE-0.11.md)、[0.10功能说明](docs/RELEASE-0.10.md)、[0.9功能说明](docs/RELEASE-0.9.md)、[0.8功能说明](docs/RELEASE-0.8.md)、[0.7功能说明](docs/RELEASE-0.7.md)、[0.6功能说明](docs/RELEASE-0.6.md)、[0.5功能说明](docs/RELEASE-0.5.md)、[0.4功能说明](docs/RELEASE-0.4.md)、[0.3功能说明](docs/RELEASE-0.3.md)及[0.2功能说明](docs/RELEASE-0.2.md)，0.1设计历史见 [原实施记录](docs/IMPLEMENTATION.md)，验证结果见 [QA](docs/QA.md)。

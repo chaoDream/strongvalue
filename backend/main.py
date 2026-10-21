@@ -19,12 +19,12 @@ from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validat
 from .compound_takeoff import component_quantity
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.22.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.23.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
                 '给排水': '管线平纵断面、材质及埋深', '电气': '配电系统及敷设方式', '合同计价': '合同、计量与取费依据'}
-REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions', 'engineering_structures', 'engineering_settlements'}
+REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions', 'engineering_structures', 'engineering_settlements', 'integration_trials'}
 
 
 def password_hash(password, salt=None):
@@ -90,7 +90,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials']:
         p.setdefault(key, [])
     return p
 
@@ -782,6 +782,9 @@ def apply_review(c, p, body, a, hash_verified=False):
             raise HTTPException(409, '历史诊断只供查阅，请复核最新诊断版本')
     approve = body['decision'] == 'approve'
     if approve:
+        if collection == 'integration_trials':
+            from .integration_trials import validate
+            validate(p, target)
         if collection == 'engineering_settlements':
             from .engineering_settlements import validate
             validate(p,target)
@@ -911,7 +914,7 @@ def apply_review(c, p, body, a, hash_verified=False):
                 if b.get('change_id') == target['id']:
                     b['state'] = 'stale'
                     find(p, 'takeoffs', b['takeoff_id'])['state'] = 'stale'
-        if not approve and collection != 'engineering_settlements':
+        if not approve and collection not in ('engineering_settlements', 'integration_trials'):
             if collection == 'boq_mappings':
                 from .boq_mapping import invalidate_dependents
                 invalidate_dependents(p, {target['id']})
@@ -1045,7 +1048,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.22.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.23.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
@@ -1166,6 +1169,8 @@ from .quota_catalog import router as quota_catalog_router
 app.include_router(quota_catalog_router)
 from .enterprise_quotas import router as enterprise_quota_router
 app.include_router(enterprise_quota_router)
+from .integration_trials import router as integration_trial_router
+app.include_router(integration_trial_router)
 from .engineering_settlements import router as engineering_settlement_router
 app.include_router(engineering_settlement_router)
 from .delivery import router as delivery_router
