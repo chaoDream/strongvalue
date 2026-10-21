@@ -18,7 +18,7 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.11.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.12.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -75,7 +75,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches']:
         p.setdefault(key, [])
     return p
 
@@ -145,7 +145,7 @@ def blockers(p):
         out.append('计价规则包地区或有效期不适用')
     elif not any(e['id'] == p['rules'][0].get('evidence_id') and any(d['id'] == e['document_id'] and not d.get('superseded') for d in p['documents']) for e in p['evidence']):
         out.append('计价规则依据已替代或缺失')
-    if any(x['state'] != 'rejected' and x['id'] not in p.get('applied_changes', []) for x in p.get('changes', [])):
+    if any(x['state'] not in ('rejected','cancelled') and x['id'] not in p.get('applied_changes', []) for x in p.get('changes', [])):
         out.append('存在待审或已审未应用的变更签证')
     if any(x['state'] != 'rejected' and x['id'] not in p.get('applied_price_changes', []) for x in p.get('price_changes', [])):
         out.append('存在待审或已审未应用的资源调价')
@@ -660,6 +660,8 @@ def apply_review(c, p, body, a, hash_verified=False):
         raise HTTPException(404, '审核对象不存在')
     if not hash_verified and body.get('object_hash') != store.digest(target):
         raise HTTPException(409, '对象已变更，请刷新后重新复核')
+    if collection == 'changes' and target['state'] == 'cancelled':
+        raise HTTPException(409, '已取消调量子项不能签署复核，请重新建立调量单')
     if collection == 'document_requests' and target['state'] == 'cancelled':
         raise HTTPException(409, '已取消任务须先重新开启，不能直接复核')
     if collection == 'pricing_bases' and target['id'] != p['pricing_bases'][-1]['id']:
@@ -828,6 +830,7 @@ def quote(pid: str, a=Depends(actor)):
         snapshot['document_requests']=p['document_requests']
         snapshot['pricing_bases']=p['pricing_bases']
         snapshot['quantity_diagnoses']=p['quantity_diagnoses']
+        snapshot['quantity_batches']=p['quantity_batches']
         result = calculate(p['boq'], ruleset)
         q = {'id': store.uid(), 'version': len(p['quotes'])+1, 'created_at': store.now(), 'state': 'draft',
              'input_hash': store.digest(snapshot), 'snapshot': json.loads(store.canonical(snapshot)), **result,
@@ -863,7 +866,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.11.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.12.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
@@ -941,6 +944,8 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+from .quantity_batches import router as quantity_batch_router
+app.include_router(quantity_batch_router)
 from .quantity_diagnosis import router as quantity_diagnosis_router
 app.include_router(quantity_diagnosis_router)
 from .pricing_basis import router as pricing_basis_router

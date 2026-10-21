@@ -231,22 +231,52 @@ def split_boq(pid: str, bid: str, body: dict, a=Depends(core.actor)):
     return created
 
 
+def build_change(p, body):
+    b = core.find(p, 'boq', body.get('boq_id'))
+    revoked = b.get('change_id') in p['applied_changes'] and core.find(p, 'changes', b['change_id'])['state'] == 'rejected' if b.get('change_id') else False
+    if b['state'] != 'approved' and not (b['state'] == 'stale' and revoked):
+        raise HTTPException(409, '先审定原清单再建立变更基线；已撤销签证可通过新签证修正')
+    core.require_evidence(p, body.get('evidence_id'))
+    if not isinstance(body.get('reason'), str) or not body['reason'].strip() or len(body['reason'])>3000: raise HTTPException(422, '变更原因和计量依据必填')
+    q = number(body.get('quantity'))
+    change = {'id': store.uid(), 'boq_id': b['id'], 'name': b['name'], 'unit': b['unit'], 'base_hash': store.digest(b),
+              'base_snapshot': copy.deepcopy(b), 'before_quantity': b['quantity'], 'quantity': str(q),
+              'delta': str(q-Decimal(b['quantity'])), 'evidence_id': body['evidence_id'], 'reason': body['reason'],
+              'state': 'draft', 'created_at': store.now()}
+    return change
+
+
+def apply_change_data(p, change):
+    cid = change['id']
+    b = core.find(p, 'boq', change['boq_id'])
+    if change['state'] != 'approved' or change['base_hash'] != store.digest(b):
+        raise HTTPException(409, '变更未审定或原清单已变化，请重新建立变更')
+    core.require_evidence(p, change['evidence_id'])
+    p.setdefault('boq_history', []).append(copy.deepcopy(b))
+    t = {'id': store.uid(), 'name': b['name']+'（变更后）', 'source_kind': 'change_order', 'change_id': cid,
+         'quantity': change['quantity'], 'gross': change['quantity'], 'unit': b['unit'], 'formula': '原工程量 + 审定变更差量',
+         'parameters': {'before': change['before_quantity'], 'delta': change['delta']}, 'rule_version': 'change-1.0',
+         'measurement_basis': change['reason'], 'evidence': {'change': change['evidence_id']}, 'state': 'approved'}
+    p['takeoffs'].append(t)
+    old_takeoff_ids = {l['takeoff_id'] for l in links(b)}
+    b.update(quantity=change['quantity'], takeoff_id=t['id'], quantity_links=[{'takeoff_id': t['id'], 'quantity': change['quantity']}],
+             change_id=cid, state='draft')
+    active_ids = {l['takeoff_id'] for line in p['boq'] for l in links(line)}
+    superseded = [x for x in p['takeoffs'] if x['id'] in old_takeoff_ids and x['id'] not in active_ids]
+    p.setdefault('takeoff_history', []).extend(copy.deepcopy(superseded))
+    p['takeoffs'] = [x for x in p['takeoffs'] if x['id'] not in {t['id'] for t in superseded}]
+    p['applied_changes'].append(cid)
+    core.invalidate(p, 'quotes')
+    return b
+
+
 @router.post('/projects/{pid}/changes')
 def create_change(pid: str, body: dict, a=Depends(core.actor)):
     core.edit(a)
-    with store.transaction() as c:
+    with store.transaction() as c, localcontext() as ctx:
+        ctx.prec = 80
         p = core.project(c, pid, a)
-        b = core.find(p, 'boq', body.get('boq_id'))
-        revoked = b.get('change_id') in p['applied_changes'] and core.find(p, 'changes', b['change_id'])['state'] == 'rejected' if b.get('change_id') else False
-        if b['state'] != 'approved' and not (b['state'] == 'stale' and revoked):
-            raise HTTPException(409, '先审定原清单再建立变更基线；已撤销签证可通过新签证修正')
-        core.require_evidence(p, body.get('evidence_id'))
-        if not body.get('reason', '').strip(): raise HTTPException(422, '变更原因和计量依据必填')
-        q = number(body.get('quantity'))
-        change = {'id': store.uid(), 'boq_id': b['id'], 'name': b['name'], 'unit': b['unit'], 'base_hash': store.digest(b),
-                  'base_snapshot': copy.deepcopy(b), 'before_quantity': b['quantity'], 'quantity': str(q),
-                  'delta': str(q-Decimal(b['quantity'])), 'evidence_id': body['evidence_id'], 'reason': body['reason'],
-                  'state': 'draft', 'created_at': store.now()}
+        change = build_change(p, body)
         p['changes'].append(change)
         core.invalidate(p, 'quotes')
         store.audit(c, p, a, 'CHANGE_REQUESTED', change)
@@ -260,27 +290,11 @@ def apply_change(pid: str, cid: str, a=Depends(core.actor)):
     with store.transaction() as c:
         p = core.project(c, pid, a)
         change = core.find(p, 'changes', cid)
+        if change.get('batch_id'):
+            raise HTTPException(409, '批量调量的子项须由整批应用入口执行')
         if cid in p['applied_changes']: return {'duplicate': True}
-        b = core.find(p, 'boq', change['boq_id'])
-        if change['state'] != 'approved' or change['base_hash'] != store.digest(b):
-            raise HTTPException(409, '变更未审定或原清单已变化，请重新建立变更')
-        core.require_evidence(p, change['evidence_id'])
-        p.setdefault('boq_history', []).append(copy.deepcopy(b))
-        t = {'id': store.uid(), 'name': b['name']+'（变更后）', 'source_kind': 'change_order', 'change_id': cid,
-             'quantity': change['quantity'], 'gross': change['quantity'], 'unit': b['unit'], 'formula': '原工程量 + 审定变更差量',
-             'parameters': {'before': change['before_quantity'], 'delta': change['delta']}, 'rule_version': 'change-1.0',
-             'measurement_basis': change['reason'], 'evidence': {'change': change['evidence_id']}, 'state': 'approved'}
-        p['takeoffs'].append(t)
-        old_takeoff_ids = {l['takeoff_id'] for l in links(b)}
-        b.update(quantity=change['quantity'], takeoff_id=t['id'], quantity_links=[{'takeoff_id': t['id'], 'quantity': change['quantity']}],
-                 change_id=cid, state='draft')
-        active_ids = {l['takeoff_id'] for line in p['boq'] for l in links(line)}
-        superseded = [x for x in p['takeoffs'] if x['id'] in old_takeoff_ids and x['id'] not in active_ids]
-        p.setdefault('takeoff_history', []).extend(copy.deepcopy(superseded))
-        p['takeoffs'] = [x for x in p['takeoffs'] if x['id'] not in {t['id'] for t in superseded}]
-        p['applied_changes'].append(cid)
-        core.invalidate(p, 'quotes')
-        store.audit(c, p, a, 'CHANGE_APPLIED', {'change_id': cid, 'boq_id': b['id'], 'takeoff_id': t['id']})
+        b = apply_change_data(p, change)
+        store.audit(c, p, a, 'CHANGE_APPLIED', {'change_id': cid, 'boq_id': b['id'], 'takeoff_id': b['takeoff_id']})
         store.save(c, p)
     return b
 
