@@ -2687,3 +2687,14 @@ input::placeholder,textarea::placeholder {
   .sidebar-note { margin-top:12px; margin-bottom:10px; padding:9px; }
   .sidebar nav button { padding-top:10px; padding-bottom:10px; }
 }
+
+.pdf-page-stage {position:relative;margin:0 auto;min-height:1px;}
+.pdf-region-highlight {position:absolute;border:2px solid #c58419;background:#ffca4938;box-shadow:0 0 0 1px #fff8;pointer-events:none;z-index:2;}
+.pdf-region-highlight.selected {border-color:#276b59;background:#559a7c30;}
+.pdf-region-selector {position:absolute;inset:0;z-index:3;cursor:crosshair;touch-action:none;}
+.pdf-region-tools {display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px;background:#f7faf4;border-bottom:1px solid #dce5d4;}
+.pdf-region-tools span,.pdf-region-caption {font-size:11px;color:#64785c;}
+.pdf-region-caption {padding:9px 12px;background:#fff4d8;overflow-wrap:anywhere;}
+.region-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+.evidence-index {margin-top:16px;border-top:1px solid #dce5d4;padding:12px;max-height:260px;overflow:auto;}
+.evidence-index p {font-size:11px;overflow-wrap:anywhere;color:#65735f;}
