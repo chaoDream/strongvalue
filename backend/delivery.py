@@ -89,10 +89,12 @@ def inspect_delivery(c, p, q):
 
 
 @router.get('/projects/{pid}/delivery-check')
-def check_delivery(pid: str, quote_id: str = '', a=Depends(core.actor)):
+def check_delivery(pid: str, quote_id: str = '', unpriced: bool = False, a=Depends(core.actor)):
     with store.transaction() as c:
         p = core.project(c, pid, a)
-        q = core.find(p, 'quotes', quote_id) if quote_id else (p['quotes'][-1] if p['quotes'] else None)
+        if unpriced and quote_id:
+            raise HTTPException(422, '不能同时选择报价版本和当前无价草稿')
+        q = None if unpriced else (core.find(p, 'quotes', quote_id) if quote_id else (p['quotes'][-1] if p['quotes'] else None))
         return inspect_delivery(c, p, q)[0]
 
 

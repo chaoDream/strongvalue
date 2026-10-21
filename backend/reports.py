@@ -127,7 +127,7 @@ def tables(p, q, approved):
               ('费用与税金', ['费用', '基数', '费率', '金额', '依据'],
                [[f['name'], f['base_amount'], f['rate'], f['amount'], f.get('source', '')] for f in (q['fees'] if q else [])]),
               ('资源价格表', ['资源', '类型', '单价', '地区', '期次', '税制', '有效期', '价格来源 / 授权'],
-               [[r['name'], r.get('type', ''), r['price'], r['region'], r['period'], r['tax_mode'], r['valid_until'], r['source']+' / '+r['license']] for b in items for quota in b.get('quotas', []) for r in quota['resources']]),
+               [[r['name'], r.get('type', ''), '待询价' if r.get('pricing_status')=='unpriced' else r['price'], r.get('region',''), r.get('period',''), r.get('tax_mode',''), r.get('valid_until',''), '尚无价格依据' if r.get('pricing_status')=='unpriced' else r['source']+' / '+r['license']] for b in items for quota in b.get('quotas', []) for r in quota['resources']]),
               ('依据与证据', ['证据 ID', '文件', '文件哈希', '页码', '提取方式', '原文 / 标注', '坐标约定', '归一化区域', '页面旋转及裁切'],
                [[e['id'], next((d['name'] for d in snapshot['documents'] if d['id'] == e['document_id']), ''), e['document_hash'], e['page'] or '无固定页码', e['method'], e['text'], e.get('coordinate_space') or '', json.dumps(e.get('bbox'),ensure_ascii=False) if e.get('bbox') is not None else '', json.dumps(e.get('page_geometry'),ensure_ascii=False) if e.get('page_geometry') else ''] for e in snapshot['evidence']]),
               ('审核记录', ['对象类型', '对象 ID', '决定', '复核人', '时间', '依据', '对象哈希'],
@@ -149,6 +149,15 @@ def tables(p, q, approved):
                        [[b['name'],batch_states[b['state']]+' / '+str(len(b['change_ids'])),b['reason']+(('；取消：'+b['cancel_reason']) if b['state']=='cancelled' else ''),
                          ('原总价 '+b['impact']['before_total']+' / 调整后 '+b['impact']['after_total']+' / 差额 '+b['impact']['delta']+'；'+b['impact']['notice']) if b['impact']['available'] else b['impact']['notice'],
                          ', '.join(b['change_ids'])] for b in snapshot['quantity_batches']]))
+    from .pricing_tasks import tasks
+    pending_tasks = tasks(snapshot)
+    if pending_tasks:
+        result.append(('待询价与匹配任务', ['清单', '任务', '资源编码 / 名称', '规格 / 单位 / 原消耗', '费用归属', '原始依据 / 基线'],
+                       [[t['boq_name'], '待询价' if t['kind']=='price_inquiry' else '待定额匹配',
+                         (t['resource']['resource_code']+' / '+t['resource']['name']) if t['resource'] else '',
+                         (t['resource']['specification']+' / '+t['resource']['unit']+' / '+str(t['resource']['consumption'])) if t['resource'] else '',
+                         t['resource']['fee_allocation'] if t['resource'] else '',
+                         ((t['resource']['evidence_id']+' / ') if t['resource'] else '')+t['boq_hash']] for t in pending_tasks]))
     price_changes = [x for x in snapshot.get('price_changes', []) if x['id'] in snapshot.get('applied_price_changes', [])]
     if price_changes:
         result.append(('资源调价台账', ['清单', '资源', '原单价', '新单价', '单位', '价格期次及税制', '来源及许可', '调价依据', '证据'],
@@ -183,7 +192,7 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if title not in ('工程量差异诊断','批量调量台账','变更签证台账'): continue
+        if title not in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
@@ -219,7 +228,7 @@ def export_report(p, q, fmt, approved, template=None):
             s.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(2, len(headers)))
             s.append(headers)
             for row in rows:
-                s.append([float(Decimal(str(v))) if headers[i] in numeric_headers and v != '' else str(v) for i, v in enumerate(row)])
+                s.append([float(Decimal(str(v))) if headers[i] in numeric_headers and v not in ('', '待询价') else str(v) for i, v in enumerate(row)])
             if not rows:
                 s.append(['未提供 / 待编制'])
             for cell in s[1]+s[2]:
@@ -239,7 +248,7 @@ def export_report(p, q, fmt, approved, template=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if title in ('工程量差异诊断','批量调量台账','变更签证台账'):
+                if title in ('工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)

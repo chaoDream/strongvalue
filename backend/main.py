@@ -18,7 +18,7 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.14.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.15.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -188,6 +188,19 @@ def price_blockers(p):
                 except (DomainError, KeyError, TypeError) as error:
                     out.append('定额换算无效：'+str(error))
             for r in q.get('resources', []):
+                from .engine import resource_pricing_state
+                try:
+                    pending = resource_pricing_state(r) == 'unpriced'
+                    if not pending:
+                        number(r.get('price'))
+                except (DomainError, KeyError, TypeError) as error:
+                    out.append(r.get('name', '资源')+'价格无效：'+str(error))
+                    continue
+                if pending:
+                    out.append(r.get('name', '资源')+'待询价，不能以零价参与组价')
+                    continue
+                if r.get('source_type') == '历史审核价':
+                    out.append(r.get('name', '资源')+'历史审核价仅供参考，须补充当前适用且获授权的价格')
                 if r.get('price_change_id'):
                     change = next((x for x in p.get('price_changes', []) if x['id'] == r['price_change_id']), None)
                     if not change or change['state'] != 'approved' or change['id'] not in p.get('applied_price_changes', []):
@@ -222,7 +235,8 @@ def view(p):
     from .document_requests import source_issues
     from .pricing_basis import issues as date_issues
     from .reconciliation import context_hash
-    return {**p, 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities(), 'document_request_source_issues': source_issues(p), 'pricing_basis_issues': date_issues(p), 'quantity_context_hash': context_hash(p)}
+    from .pricing_tasks import tasks
+    return {**p, 'pricing_tasks': tasks(p), 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities(), 'document_request_source_issues': source_issues(p), 'pricing_basis_issues': date_issues(p), 'quantity_context_hash': context_hash(p)}
 
 
 class Login(BaseModel):
@@ -579,19 +593,29 @@ def generate_boq(pid: str, a=Depends(actor)):
     return p['boq']
 
 
+@app.get('/api/v1/projects/{pid}/pricing-tasks')
+def pricing_tasks(pid: str, a=Depends(actor)):
+    from .pricing_tasks import tasks
+    with store.connect() as c:
+        return tasks(project(c, pid, a))
+
+
 @app.put('/api/v1/projects/{pid}/boq/{bid}')
 def update_boq(pid: str, bid: str, body: dict, a=Depends(actor)):
     edit(a)
     with store.transaction() as c:
         p = project(c, pid, a)
         b = find(p, 'boq', bid)
+        if 'object_hash' in body and body['object_hash'] != store.digest(b):
+            raise HTTPException(409, '清单或资源已变化，请刷新后重新核对')
         if b.get('mapping_ref') and 'code' in body and body['code'] != b['code']:
             raise HTTPException(409, '此编码来自已审映射；更换编码请修订并采用新的有据映射')
         if 'quotas' in body:
             if not isinstance(body['quotas'], list):
                 raise HTTPException(422, '定额须为数组')
             try:
-                calculate([{**b, 'quotas': body['quotas']}], {'fees': []})
+                from .engine import validate_pricing_inputs
+                validate_pricing_inputs([{**b, 'quotas': body['quotas']}])
                 for q in body['quotas']:
                     require_evidence(p, q.get('evidence_id'))
                     if 'conversion' in q:
@@ -894,15 +918,17 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.14.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.15.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
-def export(pid: str, format: str = 'json', quote_id: str = '', template_id: str = '', a=Depends(actor)):
+def export(pid: str, format: str = 'json', quote_id: str = '', template_id: str = '', unpriced: bool = False, a=Depends(actor)):
     from .reports import export_report
     with store.transaction() as c:
         p = project(c, pid, a)
-        q = find(p, 'quotes', quote_id) if quote_id else (p['quotes'][-1] if p['quotes'] else None)
+        if unpriced and quote_id:
+            raise HTTPException(422, '不能同时选择报价版本和当前无价草稿')
+        q = None if unpriced else (find(p, 'quotes', quote_id) if quote_id else (p['quotes'][-1] if p['quotes'] else None))
         approved = bool(q and p['report_approval'] and p['report_approval']['quote_id'] == q['id'] and q['id'] not in p['stale_quotes'] and not blockers(p))
         from .templates import find_template
         template = find_template(c, template_id, a['tenant']) if template_id else None

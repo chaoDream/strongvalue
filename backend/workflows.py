@@ -168,6 +168,8 @@ def build_price_change(p, body):
         row = lookup.get(item['key'])
         if not row or row['boq_hash'] != item.get('boq_hash') or row['resource_hash'] != item.get('resource_hash'):
             raise HTTPException(409, '资源已变化，请重新读取后核对调价')
+        if row['resource'].get('pricing_status') == 'unpriced':
+            raise HTTPException(409, '待询价资源没有原价，不能生成调价差额；请在定额资源编辑中补价并重新复核')
         after = {**row['resource'], **{k: metadata[k] for k in ['source', 'license', 'period', 'region', 'tax_mode', 'valid_from', 'valid_until', 'evidence_id', 'source_type']},
                  'price': str(number(item.get('price')))}
         after.pop('price_change_id', None)

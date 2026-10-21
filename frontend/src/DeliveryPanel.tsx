@@ -6,7 +6,7 @@ export default function DeliveryPanel({p,quoteId,artifacts,request}:{p:Obj;quote
  useEffect(()=>{setCheck(null);setResult(null);setArtifactId('');setError('')},[p.id,quoteId,p.updated_at]);
  async function run(kind:'delivery'|'artifact'){
   setBusy(true);setError('');if(kind==='artifact')setResult(null);else setCheck(null);
-  try{const value=await request('/projects/'+p.id+(kind==='delivery'?'/delivery-check'+(quoteId?'?quote_id='+encodeURIComponent(quoteId):''):'/artifacts/'+artifactId+'/verify'));if(kind==='delivery')setCheck(value);else setResult(value)}catch(e:any){setError(e.message)}finally{setBusy(false)}
+  try{const value=await request('/projects/'+p.id+(kind==='delivery'?'/delivery-check'+(quoteId==='unpriced'?'?unpriced=true':quoteId?'?quote_id='+encodeURIComponent(quoteId):''):'/artifacts/'+artifactId+'/verify'));if(kind==='delivery')setCheck(value);else setResult(value)}catch(e:any){setError(e.message)}finally{setBusy(false)}
  }
  return <section className="card space-bottom delivery-panel"><div className="section-head"><div><h2><PackageCheck size={18}/> 交付证据完整性</h2><p>ZIP包含选定版本原件、快照、审核日志、PDF / Excel及离线校验工具；原件去重后上限100MB。</p></div><button className="btn" disabled={busy} onClick={()=>run('delivery')}>{busy?'校验中…':'检查选定版本证据'}</button></div>
   <p className="form-note">完整性检查通过只说明文件与记录一致，不代表专业审定。包内包含原始资料及审核意见，请按项目保密范围交付；业务未审或版本失效时仍标记草稿。</p>

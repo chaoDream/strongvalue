@@ -202,6 +202,8 @@ def reference_errors(p):
             if not ref and not (evidence or {}).get('library_origin'):
                 continue
             try:
+                if r.get('pricing_status') == 'unpriced':
+                    raise HTTPException(409,'待询价资源不能视为已采用的企业价格，请补充当前价格依据')
                 if not isinstance(ref,dict) or not isinstance(ref.get('id'),str) or not isinstance(ref.get('hash'),str):
                     raise HTTPException(409,'价格来源于企业库，请通过企业价格采用流程重新确认')
                 if ref['id'] not in cache:

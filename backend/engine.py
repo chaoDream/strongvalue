@@ -174,6 +174,42 @@ def takeoff(kind, params):
             'formula': formula, 'rule_version': 'geometry-1.0' if kind in ('slab', 'walls', 'pipe') else 'geometry-2.0', 'parameters': params}
 
 
+PRICE_SOURCE_TYPES = ('官方信息价', '供应商报价', '询价', '历史审核价', '人工录入')
+
+
+def resource_pricing_state(resource):
+    state = resource.get('pricing_status', 'priced')
+    if state not in ('priced', 'unpriced'):
+        raise DomainError('资源价格状态须为已录价或待询价')
+    if state == 'priced' and 'pricing_status' in resource and not resource.get('source_type'):
+        raise DomainError('已录价资源须明确价格来源类型')
+    if resource.get('source_type') is not None and resource['source_type'] not in PRICE_SOURCE_TYPES:
+        raise DomainError('资源价格来源类型无效')
+    if state == 'unpriced':
+        if resource.get('price') is not None:
+            raise DomainError('待询价资源价格必须为空，不能用零价代替缺价')
+        for key in ['name', 'resource_code', 'specification', 'unit', 'fee_allocation', 'evidence_id']:
+            if not isinstance(resource.get(key), str) or not resource[key].strip() or len(resource[key]) > 2000:
+                raise DomainError('待询价资源须填写名称、资源编码、规格、单位、费用归属及原始依据（最多2000字）')
+        if resource.get('type') not in ('人工', '材料', '机械', '设备'):
+            raise DomainError('资源类别无效')
+        number(resource['consumption'])
+    return state
+
+
+def validate_pricing_inputs(items):
+    """Validate saved drafts without producing partial amounts or inventing missing prices."""
+    priced = []
+    for item in items:
+        quotas = []
+        for quota in item['quotas']:
+            quota_conversion(quota)
+            resources = [r for r in quota['resources'] if resource_pricing_state(r) != 'unpriced']
+            quotas.append({**quota, 'resources': resources})
+        priced.append({**item, 'quotas': quotas})
+    calculate(priced, {'fees': []})
+
+
 def quota_conversion(quota):
     """Optional, explicit consumption conversion; never infer units or official factors."""
     if 'conversion' not in quota:
@@ -213,6 +249,8 @@ def calculate(items, rules):
             coefficient = number(quota.get('coefficient', '1'), True)
             conversion = quota_conversion(quota)
             for r in quota['resources']:
+                if resource_pricing_state(r) == 'unpriced':
+                    raise DomainError('存在待询价资源，补齐有效价格并复核后才能计价')
                 unit_factor = number(conversion['unit_factor'], True) if conversion else Decimal(1)
                 category_factor = number(conversion['category_factors'][r['type']], True) if conversion else Decimal(1)
                 effective_coefficient = coefficient * unit_factor * category_factor
