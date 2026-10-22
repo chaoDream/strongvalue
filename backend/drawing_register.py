@@ -149,19 +149,37 @@ def report_tables(p, current_checks=False):
                      ('当前互参' if r['id'] in ref_ids else '历史互参')+' / '+states.get(r['state'],r['state']),
                      r['evidence_id']+' / '+r['raw_text'],r['reason']])
     if refs:result.append(('平立剖图纸互参',['构件 / 索引类型','索引标记 / 互参修订','起点 → 目标图号','所指图纸登记版本','互参范围 / 审核状态','原始证据 / 摘录','关联依据'],rows))
+    adopted=[]
+    labels={'drawing_no':'图号','title':'图名','edition':'版次','view_type':'视图类型'}
+    for r in sheets:
+        trace=r.get('candidate_trace')
+        if not trace:continue
+        for key,label in labels.items():
+            original=trace['fields'].get(key,[])
+            adopted.append([r['drawing_no']+' / R'+str(r['revision']),trace['parser_version']+' / '+label,
+                            ' / '.join(o['value'] for o in original) or '原文未提取，人工补充',
+                            (VIEWS[r[key]] if key=='view_type' else r[key])+('；人工补充或修正：'+r['reason'] if key in trace['corrections'] else '；核对采用'),
+                            trace['evidence_id']+' / '+trace['id'],'；'.join(o['raw_text'] for o in original) or '请核对登记原文及人工说明'])
+    if adopted:result.append(('图纸身份候选采用',['图纸 / 登记修订','采用规则 / 字段','原文候选值','登记值 / 修正说明','候选证据 / ID','字段摘录'],adopted))
     if current_checks and (sheets or refs):
         pending=issues(p)
         if pending:result.append(('图纸校核待办',['当前未解决事项'],[[s] for s in pending]))
     return result
 
 
-def save_record(pid,collection,body,a,previous_id=''):
+def save_record(pid,collection,body,a,previous_id='',candidate_id=''):
     core.edit(a)
     allowed=({'document_id','page','drawing_no','title','edition','view_type','discipline','evidence_id','raw_text','reason'} if collection=='drawing_sheets' else
              {'from_sheet_id','to_sheet_id','component_name','kind','marker','evidence_id','raw_text','reason'})
-    if set(body)-allowed-({'object_hash'} if previous_id else set()):raise HTTPException(422,'图纸登记含不支持字段')
+    if set(body)-allowed-({'object_hash'} if previous_id or candidate_id else set()):raise HTTPException(422,'图纸登记含不支持字段')
     with store.transaction() as c:
         p=core.project(c,pid,a);old=core.find(p,collection,previous_id) if previous_id else None
+        candidate=None
+        if candidate_id:
+            from .drawing_candidates import require_candidate
+            candidate=require_candidate(p,candidate_id,body.get('object_hash'))
+            if any(body.get(k)!=candidate[k] for k in ('document_id','page','evidence_id')):
+                raise HTTPException(409,'采用候选须绑定原来的文件、页码和证据；其他来源请人工登记')
         if old:
             assert_current(p,collection,old)
             if body.get('object_hash')!=store.digest(old):raise HTTPException(409,'图纸记录已变化，请刷新后修订')
@@ -180,9 +198,18 @@ def save_record(pid,collection,body,a,previous_id=''):
             e,d=source(p,row['evidence_id'],start['document_id'],start['page'],row['raw_text'])
             if row['marker'] not in row['raw_text']:raise HTTPException(422,'索引标记须出现在所选原文摘录中')
         row.update(document_hash=d['hash'],evidence_hash=store.digest(e))
+        if collection=='drawing_sheets':
+            row['identity_origin']='explicit_labels' if candidate else 'manual_revision' if old else 'manual'
+            if candidate:
+                row['candidate_trace']={**candidate,'candidate_hash':store.digest(candidate),
+                    'corrections':{k:{'suggested':candidate['suggestions'].get(k),'adopted':row[k]}
+                                   for k in ('drawing_no','title','edition','view_type') if candidate['suggestions'].get(k)!=row[k]}}
         p[collection].append(row)
         core.invalidate(p,'components' if collection=='drawing_sheets' else 'quotes')
         store.audit(c,p,a,'DRAWING_SHEET_RECORDED' if collection=='drawing_sheets' else 'DRAWING_REFERENCE_RECORDED',row)
+        if candidate:
+            store.audit(c,p,a,'DRAWING_IDENTITY_CANDIDATE_ADOPTED',{'candidate_id':candidate_id,'candidate_hash':store.digest(candidate),
+                'sheet_id':row['id'],'corrections':row['candidate_trace']['corrections']})
         store.save(c,p)
     return row
 
