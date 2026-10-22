@@ -155,13 +155,18 @@ def test_source_edit_or_candidate_withdrawal_blocks_adoption(clients):
     assert not e.get('/api/v1/organization/quota-library').json()['items'][0]['available']
 
 
-def test_stale_preview_date_and_confirmation_are_atomic(clients):
+@pytest.mark.parametrize('pricing_offset',[0,1])
+def test_stale_preview_date_and_confirmation_are_atomic(clients,pricing_offset):
     e,r,sid,item,publish,old=source(clients);item=enterprise_review(r,item)
     e,r,pid,comp,q=priced_project(clients);b,body=request_body(e,pid,item)
+    # Pin the project date: host UTC tomorrow may equal Shanghai today.
+    initial_day=date.today()+timedelta(days=pricing_offset)
+    response=e.patch(f'/api/v1/projects/{pid}/settings',json={'pricing_date':initial_day.isoformat(),'reason':'固定测试起始计价日期'})
+    assert response.status_code==200,response.text
     preview=e.post(endpoint(pid,b,item,'preview'),json=body).json()
     body.update(preview_hash=preview['preview_hash'],request_id=store.uid(),reason='test',confirm_conditions=False)
     assert e.post(endpoint(pid,b,item,'adopt'),json=body).status_code==422
-    e.patch(f'/api/v1/projects/{pid}/settings',json={'pricing_date':(date.today()+timedelta(days=1)).isoformat(),'reason':'测试日期变化'})
+    e.patch(f'/api/v1/projects/{pid}/settings',json={'pricing_date':(initial_day+timedelta(days=1)).isoformat(),'reason':'测试日期变化'})
     before=get(e,pid);body['confirm_conditions']=True
     assert e.post(endpoint(pid,b,item,'adopt'),json=body).status_code==409
     assert get(e,pid)==before

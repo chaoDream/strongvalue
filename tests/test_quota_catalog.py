@@ -102,10 +102,15 @@ def test_source_change_revocation_and_detach_keep_old_quote(clients):
     assert get(e,pid)['quotes']==saved and len(get(e,pid)['quota_adoptions'])==1
 
 
-def test_stale_preview_due_to_date_and_source_change(clients):
+@pytest.mark.parametrize('pricing_offset',[0,1])
+def test_stale_preview_due_to_date_and_source_change(clients,pricing_offset):
     e,r,pid,s,t,item,publish,old=setup(clients);base=f'/api/v1/projects/{pid}';approve(r,pid,'catalog',item)
+    # Pin the project date: host UTC tomorrow may equal Shanghai today.
+    initial_day=date.today()+timedelta(days=pricing_offset)
+    response=e.patch(base+'/settings',json={'pricing_date':initial_day.isoformat(),'reason':'固定测试起始计价日期'})
+    assert response.status_code==200,response.text
     b=body_for(e,pid,t,item);preview=e.post(endpoint(pid,t,item,'preview'),json=b).json()
-    e.patch(base+'/settings',json={'pricing_date':(date.today()+timedelta(days=1)).isoformat(),'reason':'测试日期变化'})
+    e.patch(base+'/settings',json={'pricing_date':(initial_day+timedelta(days=1)).isoformat(),'reason':'测试日期变化'})
     b.update(preview_hash=preview['preview_hash'],reason='测试',confirm_conditions=True,request_id=store.uid())
     assert e.post(endpoint(pid,t,item,'adopt'),json=b).status_code==409
     source=e.put(base+'/boq/'+s['id'],json={'features':'原清单条件修改'}).json()
