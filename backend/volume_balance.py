@@ -6,7 +6,7 @@ from .compound_takeoff import component_quantity, structured_validator, op, text
 from .engine import DomainError, number, precise, quantity_number
 
 EXCAVATION_KINDS = {'trench','station_trench','spatial_regions','planar_regions','compound'}
-OCCUPATION_KINDS = {'route_bedding','pipe_envelope','slab','walls','masonry','ring','spatial_regions','planar_regions','compound'}
+OCCUPATION_KINDS = {'circular_chamber','route_bedding','pipe_envelope','slab','walls','masonry','ring','spatial_regions','planar_regions','compound'}
 VERSION = 'reviewed-volume-balance-1.0'
 NOTICE = '按当前已审构件体积及核定比例建立回填平衡，不推断实体是否位于开挖内或相互重叠。须确认同一计量范围及扣减不重复。采用来源已审工程量（含来源既定修约），不还原未修约量，不自动推算管道外包体积、压实/松方系数、分层做法或运输。'
 
@@ -39,8 +39,10 @@ def source_component(p, cid, excavation=False):
     allowed = EXCAVATION_KINDS if excavation else OCCUPATION_KINDS
     if s['kind'] not in allowed or s['state'] != 'approved':
         raise HTTPException(409,'须选择当前已审定且适用于'+('开挖' if excavation else '实体占位')+'的体积构件')
-    if s['kind'] in ('route_bedding','pipe_envelope','station_trench','spatial_regions','planar_regions','compound'):
+    if s['kind'] in ('circular_chamber','route_bedding','pipe_envelope','station_trench','spatial_regions','planar_regions','compound'):
         structured_validator(s['kind'])(p,s,saved=True)
+    if s['kind']=='circular_chamber' and s.get('purpose')!='outer_envelope':
+        raise HTTPException(409,'井筒材料体积不能代替回填占位，请另建并审定井筒外包体积')
     r = component_quantity(s)
     if r['unit'] != 'm³' or s.get('preview') != r:
         raise HTTPException(409,'关联构件须为可复算的立方米体积，不能关联面积、长度或被改写的预览')
@@ -91,6 +93,7 @@ def calculate(comp, sources=None):
     for i,d in enumerate(occupations):
         s = by_id[d['component_id']];r = reference(s)
         if r['unit']!='m³' or s['kind'] not in OCCUPATION_KINDS:raise DomainError('占位来源须为适用的立方米实体，不能递归引用回填')
+        if s['kind']=='circular_chamber' and s.get('purpose')!='outer_envelope':raise DomainError('回填须引用井筒外包占位，不能扣除井筒材料体积')
         if d['component_hash']!=r['component_hash']:raise HTTPException(409,'扣减来源已修订，请重新读取并核定分配比例')
         factor = number(d['factor'],True)
         if factor>1:raise DomainError('核定扣除比例须大于0且不超过1；不扣除的构件请移除')

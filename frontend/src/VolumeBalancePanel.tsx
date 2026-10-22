@@ -2,7 +2,7 @@ import React,{useState} from 'react';
 import {Plus,X,Trash2} from 'lucide-react';
 type Obj=Record<string,any>;
 const excavationKinds=['trench','station_trench','spatial_regions','planar_regions','compound'];
-const occupationKinds=['route_bedding','pipe_envelope','slab','walls','masonry','ring','spatial_regions','planar_regions','compound'];
+const occupationKinds=['circular_chamber','route_bedding','pipe_envelope','slab','walls','masonry','ring','spatial_regions','planar_regions','compound'];
 const states:Obj={draft:'待复核',approved:'已审定',stale:'已失效',rejected:'已拒绝',needs_info:'待补件'};
 function F({label,children}:any){return <label className="field"><span>{label}</span>{children}</label>}
 
@@ -22,7 +22,7 @@ export default function VolumeBalancePanel({p,user,request,refresh,onReview,sour
   const [draft,setDraft]=useState<Obj|null>(null),[candidate,setCandidate]=useState<Obj|null>(null),[preview,setPreview]=useState<Obj|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const base='/projects/'+p.id,editable=user.role!=='reviewer';
   const eligible=(kinds:string[])=>p.components.filter((c:Obj)=>c.state==='approved'&&c.preview.unit==='m³'&&kinds.includes(c.kind));
-  const excavations=eligible(excavationKinds),occupied=eligible(occupationKinds);
+  const excavations=eligible(excavationKinds),occupied=eligible(occupationKinds).filter((c:Obj)=>c.kind!=='circular_chamber'||c.purpose==='outer_envelope');
   function change(d:Obj){setDraft(d);setPreview(null);setError('');}
   const field=(k:string,v:any)=>change({...draft,[k]:v});
   function occupation(i:number,k:string,v:any){const rows=draft!.occupations.map((d:Obj,j:number)=>i===j?{...d,[k]:v}:d);change({...draft,occupations:rows,boundaries_confirmed:false});if(k==='component_id')setCandidate(null);}
