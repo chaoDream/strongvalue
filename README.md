@@ -1,8 +1,8 @@
 # 强·报价 QiangQuote
 
-基于《融合版完整 PRD V3.0》的本地全栈工程。当前交付为 **0.28 受控工程工作台**：在0.27基础上增加模板与防水的局部分区计量，按有据设计坐标分割边界面，逐子面核定计入或排除，保留原始单位、分割依据、面积闭合和独立复核记录。
+基于《融合版完整 PRD V3.0》的本地全栈工程。当前交付为 **0.29 受控工程工作台**：在0.28基础上增加设计坐标管线三维长度，逐点确认平面坐标和高程，保留空间段长、水平投影、原始单位及总量修约，纳入独立复核、清单与计算书导出。
 
-本版功能与验收边界见 [0.28功能说明](docs/RELEASE-0.28.md)，前版能力见 [0.27功能说明](docs/RELEASE-0.27.md)、 [0.26功能说明](docs/RELEASE-0.26.md)、 [0.25功能说明](docs/RELEASE-0.25.md)、 [0.24功能说明](docs/RELEASE-0.24.md)、 [0.23功能说明](docs/RELEASE-0.23.md)、 [0.22功能说明](docs/RELEASE-0.22.md)、 [0.21功能说明](docs/RELEASE-0.21.md)、 [0.20功能说明](docs/RELEASE-0.20.md)、 [0.19功能说明](docs/RELEASE-0.19.md)、 [0.18功能说明](docs/RELEASE-0.18.md)、 [0.17功能说明](docs/RELEASE-0.17.md)、 [0.16功能说明](docs/RELEASE-0.16.md)、 [0.15功能说明](docs/RELEASE-0.15.md)、 [0.14功能说明](docs/RELEASE-0.14.md)、 [0.13功能说明](docs/RELEASE-0.13.md)、 [0.12功能说明](docs/RELEASE-0.12.md)、 [0.11功能说明](docs/RELEASE-0.11.md)、 [0.10功能说明](docs/RELEASE-0.10.md)、 [0.9功能说明](docs/RELEASE-0.9.md)、 [0.8功能说明](docs/RELEASE-0.8.md)、 [0.7功能说明](docs/RELEASE-0.7.md)、 [0.6功能说明](docs/RELEASE-0.6.md)、 [0.5功能说明](docs/RELEASE-0.5.md)、 [0.4功能说明](docs/RELEASE-0.4.md)、 [0.3功能说明](docs/RELEASE-0.3.md)及 [0.2功能说明](docs/RELEASE-0.2.md)，模型配置见 [模型接入文档](docs/MODEL-GATEWAY.md)。
+本版功能与验收边界见 [0.29功能说明](docs/RELEASE-0.29.md)，前版能力见 [0.28功能说明](docs/RELEASE-0.28.md)、 [0.27功能说明](docs/RELEASE-0.27.md)、 [0.26功能说明](docs/RELEASE-0.26.md)、 [0.25功能说明](docs/RELEASE-0.25.md)、 [0.24功能说明](docs/RELEASE-0.24.md)、 [0.23功能说明](docs/RELEASE-0.23.md)、 [0.22功能说明](docs/RELEASE-0.22.md)、 [0.21功能说明](docs/RELEASE-0.21.md)、 [0.20功能说明](docs/RELEASE-0.20.md)、 [0.19功能说明](docs/RELEASE-0.19.md)、 [0.18功能说明](docs/RELEASE-0.18.md)、 [0.17功能说明](docs/RELEASE-0.17.md)、 [0.16功能说明](docs/RELEASE-0.16.md)、 [0.15功能说明](docs/RELEASE-0.15.md)、 [0.14功能说明](docs/RELEASE-0.14.md)、 [0.13功能说明](docs/RELEASE-0.13.md)、 [0.12功能说明](docs/RELEASE-0.12.md)、 [0.11功能说明](docs/RELEASE-0.11.md)、 [0.10功能说明](docs/RELEASE-0.10.md)、 [0.9功能说明](docs/RELEASE-0.9.md)、 [0.8功能说明](docs/RELEASE-0.8.md)、 [0.7功能说明](docs/RELEASE-0.7.md)、 [0.6功能说明](docs/RELEASE-0.6.md)、 [0.5功能说明](docs/RELEASE-0.5.md)、 [0.4功能说明](docs/RELEASE-0.4.md)、 [0.3功能说明](docs/RELEASE-0.3.md)及 [0.2功能说明](docs/RELEASE-0.2.md)，模型配置见 [模型接入文档](docs/MODEL-GATEWAY.md)。
 
 数据库迁移副本、已有导出文件及离线依赖分卷见 `transfer/local-snapshot/`；恢复步骤与独立密钥接口见 [迁移及密钥说明](docs/TRANSFER-AND-SECRETS.md)。
 
@@ -59,7 +59,7 @@ PDF 会嵌入中文字体子集；macOS 自动选取系统中文字体，Linux �
 2. 上传原始 PDF、DOCX、XLSX、TXT；按实际专业分类。DWG/DXF/IFC 可登记并保留原件，当前不解析专有几何。支持多文件、30 MB 限制、内容哈希去重、同名文件版本。
 3. 查阅文字候选事实及原件。PDF 支持页码定位；DOCX/XLSX 没有可靠物理页码，证据明确标记“无固定页码”。扫描 PDF 无文字时要求人工标注，不声称已完成 OCR。
 4. 在完整性诊断中提交本专业核查依据，使用独立 `reviewer` 账号确认。项目范围外专业始终保留缺项显示。
-5. 在图纸工作台记录页码、图号、原文；为每个尺寸和扣减参数绑定证据，注明计量依据。支持九类受控几何及钢筋表汇总，单位以字段标注为准；钢筋参数必须引用结构专业证据。复杂拓扑、配筋建模和未经核定的工法不自动推算。
+5. 在图纸工作台记录页码、图号、原文；为每个尺寸和扣减参数绑定证据，注明计量依据。支持九类受控几何、钢筋表汇总及设计坐标管线三维长度，单位以字段标注为准；钢筋参数必须引用结构专业证据。复杂拓扑、配筋建模和未经核定的工法不自动推算。
 6. `reviewer` 逐项审定构件；编制账号计算工程量；`reviewer` 审定计算书。再生成候选清单，补充真实编码、特征和工程层级，提交清单复核。
 7. 为清单录入获授权的多个定额子目、版本、消耗及换算系数，以及资源来源、许可、地区、期次、税制和有效期。每个定额和资源价格均须关联当前原件证据。消耗量按**每一清单单位**录入，定额单位换算必须落实到系数。修改组价后清单需重新复核。
 8. 配置项目适用规则包和按序费用并关联原始依据；费率使用小数，基数可选分部分项或当前累计。规则经独立复核后计算报价快照。无合法定额/价格或规则未审定时阻断，不填补虚构金额。
@@ -104,8 +104,8 @@ data/           运行数据（不入版本库）
 提供 Dockerfile；镜像构建与容器运行尚未在当前环境执行验证：
 
 ```sh
-docker build -t qiangquote:0.28 .
-docker run --rm -p 127.0.0.1:8000:8000 -v qiang-data:/app/data qiangquote:0.28
+docker build -t qiangquote:0.29 .
+docker run --rm -p 127.0.0.1:8000:8000 -v qiang-data:/app/data qiangquote:0.29
 ```
 
 停止服务后整体备份 `data/`，包括 SQLite 数据库、WAL/SHM（如存在）、原始文件与导出文件。恢复时整体恢复同一备份。不要只复制数据库而遗漏原件。默认存储为本地 SQLite，JSON 聚合模型适合试点；PostgreSQL NUMERIC/JSONB、S3 私有对象仓库、Redis/隔离 worker、企业 SSO、速率限制、恶意文件扫描与集中监控属于生产化后续任务，不能把当前本地版本直接认定为 SaaS 商用部署。

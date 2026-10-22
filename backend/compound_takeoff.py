@@ -131,6 +131,9 @@ def validate(p, comp, saved=False):
 
 
 def structured_validator(kind):
+    if kind == 'design_route':
+        from .route_takeoff import validate as validate_route
+        return validate_route
     if kind == 'surface_faces':
         from .surface_takeoff import validate as validate_surface
         return validate_surface
@@ -144,6 +147,9 @@ def structured_validator(kind):
 
 
 def component_quantity(comp):
+    if comp['kind'] == 'design_route':
+        from .route_takeoff import calculate as calculate_route
+        return calculate_route(comp)
     if comp['kind'] == 'surface_faces':
         from .surface_takeoff import calculate as calculate_surface
         return calculate_surface(comp)
