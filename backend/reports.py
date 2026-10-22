@@ -195,7 +195,7 @@ def tables(p, q, approved):
                          t['surface_summary']['total_area']+' m²', t['surface_summary']['included_area']+' / '+t['surface_summary']['excluded_area']+' m²',
                          t['surface_summary']['multiplicity']+' / '+t['quantity']+' m²', t['measurement_basis'], t['source_component_hash']] for t in surfaces]))
         result.append(('逐面计量决定', ['构件 / 面', '朝向 / 平面位置（m）', '面内坐标范围（m）', '单组面积（m²）', '计量决定', '计量说明', '原始依据'],
-                       [[t['name']+' / F'+str(f['index']), f['normal']+' / '+f['plane'],
+                       [[t['name']+' / F'+str(f['index'])+(' / 原F'+str(f['parent_index'])+' 子'+str(f['sub_index']) if f.get('parent_index') else ''), f['normal']+' / '+f['plane'],
                          f['u_axis']+': '+f['u_from']+' → '+f['u_to']+'; '+f['v_axis']+': '+f['v_from']+' → '+f['v_to'],
                          f['area'], '计入' if f['included'] else '排除', f['basis'], f['evidence_id']] for t in surfaces for f in t['surface_faces']]))
         result.append(('表面几何来源', ['表面构件 / 来源长方体', '加扣 / 参数', '原始值', '原始单位', '原始依据'],
@@ -203,6 +203,10 @@ def tables(p, q, approved):
                         for t in surfaces for r in t['source_geometry']['regions'] for key, value in r['parameters'].items()]))
         result.append(('表面计量规则', ['构件', '边界规则版本', '精度', '适用范围'],
                        [[t['name'], t['rule_version'], t['rounding_rule'], t['notice']] for t in surfaces]))
+    cuts = [[t['name'], '原F'+str(c['parent_index']), c['coordinate_axis'], c['original_value']+' '+c['source_unit'],
+             c['factor'], c['canonical_value']+' m', c['evidence_id'], c['rule_version']] for t in snapshot['takeoffs'] for c in t.get('surface_subdivisions', [])]
+    if cuts:
+        result.append(('表面分区坐标', ['表面构件','原始面','分割坐标轴','原值 / 单位','换算倍数','设计坐标','原始依据','单位规则'], cuts))
     if not q:
         from .main import blockers
         next(table[2] for table in result if table[0] == '缺项与警示').extend([[x] for x in blockers(p)])
@@ -320,7 +324,7 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if title not in ('表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
+        if title not in ('表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
@@ -376,7 +380,7 @@ def export_report(p, q, fmt, approved, template=None, table_data=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if table_data is not None or title in ('表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
+                if table_data is not None or title in ('表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)

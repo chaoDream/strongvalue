@@ -6,6 +6,8 @@ from . import store
 from .engine import DomainError, precise, quantity_number
 from .compound_takeoff import op, text
 from .measurement_units import LENGTH
+from .measurement_units import VERSION as UNIT_VERSION
+from .planar_takeoff import linear
 from .spatial_takeoff import calculate as solid_quantity, validate as validate_solid
 
 VERSION = 'solid-boundary-1.0'
@@ -89,8 +91,92 @@ def source_component(p, cid):
 
 def candidates(p, cid):
     source = source_component(p, cid)
-    return {**boundary(source), 'source_component_id': source['id'], 'source_component_hash': store.digest(snapshot(source)),
+    result = boundary(source)
+    return {**result, 'base_faces': result['faces'], 'source_component_id': source['id'], 'source_component_hash': store.digest(snapshot(source)),
             'source_name': source['name'], 'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': NOTICE}
+
+
+@precise
+def partition(source, subdivisions):
+    result = boundary(source)
+    if not isinstance(subdivisions, list) or len(subdivisions) > 1000:
+        raise DomainError('分区配置须为列表，最多1000个原始分面')
+    if not subdivisions:
+        return result
+    originals = {f['face_id']: f for f in result['faces']}
+    by_id, records, faces = {}, [], []
+    for i, group in enumerate(subdivisions):
+        if not isinstance(group, dict) or set(group) != {'face_id', 'u_cuts', 'v_cuts'} or not isinstance(group['face_id'], str):
+            raise DomainError('分区须明确原始面编号和面内两轴分割坐标')
+        fid = group['face_id']
+        if fid not in originals or fid in by_id:
+            raise DomainError('分区原始面不存在、已过期或重复')
+        f = originals[fid]
+        bounds = {}
+        for axis in ['u', 'v']:
+            cuts = group[axis+'_cuts']
+            if not isinstance(cuts, list) or len(cuts) > 8:
+                raise DomainError('每面每轴最多8条分割线')
+            low, high = Decimal(f[axis+'_from']), Decimal(f[axis+'_to'])
+            original_expr = f['formula_ast']['args'][0 if axis == 'u' else 1]['args']
+            values = {low: original_expr[1], high: original_expr[0]}
+            for j, cut in enumerate(cuts):
+                if not isinstance(cut, dict) or set(cut) != {'value', 'unit', 'evidence_id'}:
+                    raise DomainError('分割坐标须保留原值、长度单位和原始依据')
+                value = linear(cut['value'], cut['unit'])
+                if not low < value < high or value in values:
+                    raise DomainError('分割线须严格位于原始面内，换算后不能重复或落在边界')
+                eid = text(cut['evidence_id'], '分割坐标原始依据', 200)
+                key = 'cut.'+str(i+1)+'.'+axis+'.'+str(j+1)
+                result['dimensions'][key] = str(cut['value'])
+                result['source_evidence'][key] = eid
+                conversion = {'parameter': key, 'original_value': str(cut['value']), 'source_unit': cut['unit'], 'factor': LENGTH[cut['unit']],
+                              'canonical_value': canonical(value), 'canonical_unit': 'm', 'rule_version': UNIT_VERSION}
+                result['unit_conversions'].append(conversion)
+                records.append({**conversion, 'parent_face_id': fid, 'parent_index': f['index'], 'axis': axis,
+                                'coordinate_axis': f[axis+'_axis'], 'evidence_id': eid})
+                values[value] = op('multiply', {'dimension': key}, {'constant': LENGTH[cut['unit']]})
+            bounds[axis] = values
+        if not group['u_cuts'] and not group['v_cuts']:
+            raise DomainError('分区配置至少需要一条分割线；不分区请移除该配置')
+        by_id[fid] = bounds
+    face_count = len(result['faces'])+sum((len(b['u'])-1)*(len(b['v'])-1)-1 for b in by_id.values())
+    if face_count > 1000:
+        raise DomainError('分区后超过1000个计量面，请拆分专业计量范围')
+    for f in result['faces']:
+        if f['face_id'] not in by_id:
+            faces.append(dict(f))
+            continue
+        bounds = by_id[f['face_id']]
+        us, vs = sorted(bounds['u']), sorted(bounds['v'])
+        child_index = 0
+        for u0, u1 in zip(us, us[1:]):
+            for v0, v1 in zip(vs, vs[1:]):
+                child_index += 1
+                c = {k: f[k] for k in ['normal', 'plane', 'u_axis', 'v_axis']}
+                c.update(u_from=canonical(u0), u_to=canonical(u1), v_from=canonical(v0), v_to=canonical(v1))
+                faces.append({**c, 'face_id': store.digest({'parent': f['face_id'], **c}), 'parent_face_id': f['face_id'],
+                              'parent_index': f['index'], 'sub_index': child_index, 'area': str((u1-u0)*(v1-v0)),
+                              'formula_ast': op('multiply', op('subtract', bounds['u'][u1], bounds['u'][u0]),
+                                                op('subtract', bounds['v'][v1], bounds['v'][v0]))})
+    if len(faces) > 1000:
+        raise DomainError('分区后超过1000个计量面，请拆分专业计量范围')
+    # Partitioning cannot create or remove any geometric boundary area.
+    if sum((Decimal(f['area']) for f in faces), Decimal(0)) != Decimal(result['total_area']):
+        raise DomainError('分区面积不闭合，请核对坐标精度')
+    result.update(faces=[{**f, 'index': i+1} for i, f in enumerate(faces)], surface_subdivisions=records)
+    return result
+
+
+def partition_candidates(p, body):
+    source = source_component(p, body.get('source_component_id'))
+    if body.get('source_component_hash') != store.digest(snapshot(source)):
+        raise HTTPException(409, '来源空间构件已修订，请重新读取边界面')
+    result = partition(source, body.get('face_subdivisions'))
+    check_sources(p, result['source_evidence'])
+    return {**result, 'base_faces': boundary(source)['faces'], 'source_component_id': source['id'],
+            'source_component_hash': body['source_component_hash'], 'source_name': source['name'],
+            'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': NOTICE}
 
 
 @precise
@@ -102,7 +188,7 @@ def calculate(comp, source=None):
     text(comp.get('measurement_basis'), '总体计量依据')
     if comp.get('source_component_id') != source['id'] or comp.get('source_component_hash') != store.digest(snapshot(source)):
         raise HTTPException(409, '来源空间构件已修订，请重新读取边界面并逐面核定')
-    result = boundary(source)
+    result = partition(source, comp.get('face_subdivisions', []))
     decisions = comp.get('face_decisions')
     if not isinstance(decisions, list) or len(decisions) != len(result['faces']):
         raise DomainError('须为全部边界面明确记录计入或排除，不能遗漏')
@@ -128,7 +214,7 @@ def calculate(comp, source=None):
             selected += Decimal(f['area']); nodes.append(f['formula_ast'])
         else: excluded += Decimal(f['area'])
     count = Decimal(source['multiplicity'])
-    return {'quantity': str(quantity_number(selected*count)), 'unit': 'm²', 'gross': str(quantity_number(Decimal(result['total_area'])*count)),
+    output = {'quantity': str(quantity_number(selected*count)), 'unit': 'm²', 'gross': str(quantity_number(Decimal(result['total_area'])*count)),
             'deduction': str(quantity_number(excluded*count)), 'parameters': {}, 'formula': '核定计入边界面积 '+str(selected)+' × '+str(count),
             'formula_ast': op('multiply', op('add', *nodes) if nodes else {'constant': '0'}, {'dimension': 'multiplicity'}),
             'dimensions': result['dimensions'], 'source_evidence': refs, 'unit_conversions': result['unit_conversions'],
@@ -139,20 +225,28 @@ def calculate(comp, source=None):
                                 'included_count': sum(d['included'] for d in decisions), 'multiplicity': str(count),
                                 'source_name': source['name'], 'source_revision': source['revision'], 'normal_totals': result['normal_totals']},
             'rule_version': VERSION, 'rounding_rule': 'Decimal 80位计算精度；表面积不另行修约', 'notice': NOTICE}
+    if result.get('surface_subdivisions'):
+        output.update(surface_subdivisions=result['surface_subdivisions'], rule_version='solid-boundary-1.1')
+    return output
 
 
-def validate(p, comp, saved=False):
+def check_sources(p, refs):
     from .main import require_evidence, find
     from .task_execution import original_bytes
-    source = source_component(p, comp.get('source_component_id'))
-    result = calculate(comp, source)
     sources, checked = {}, set()
-    for key, eid in result['source_evidence'].items():
+    for key, eid in refs.items():
         ev = require_evidence(p, eid); doc = find(p, 'documents', ev['document_id'])
         if ev['document_hash'] != doc['hash']:
             raise HTTPException(409, '表面依据与原件校验值不一致')
         if doc['hash'] not in checked: original_bytes(doc); checked.add(doc['hash'])
         sources[key] = {'evidence': ev, 'document_hash': doc['hash']}
+    return sources
+
+
+def validate(p, comp, saved=False):
+    source = source_component(p, comp.get('source_component_id'))
+    result = calculate(comp, source)
+    sources = check_sources(p, result['source_evidence'])
     stamp = store.digest({'source_component_hash': comp['source_component_hash'], 'sources': sources})
     if saved and (comp.get('source_stamp') != stamp or comp.get('evidence') != result['source_evidence'] or comp.get('preview') != result or comp.get('source_geometry') != snapshot(source)):
         raise HTTPException(409, '表面来源、计量决定或计算内容已变化，请修订后重新复核')
