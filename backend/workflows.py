@@ -60,6 +60,10 @@ def review_batch_targets(pid: str, collection: str, a=Depends(core.actor)):
         p = core.project(c, pid, a)
         objects = list(p[collection].values()) if collection == 'coverage' else p[collection]
         objects = [x for x in objects if x.get('state') not in ('approved', 'rejected', 'superseded', 'cancelled')]
+        if collection in ('drawing_sheets','drawing_references'):
+            from .drawing_register import current
+            ids={r['id'] for r in current(p,collection)}
+            objects=[x for x in objects if x['id'] in ids]
         if collection == 'quantity_diagnoses':
             from .quantity_diagnosis import latest
             objects = [x for x in objects if latest(p, x['reconciliation_id'], x['target_key'])['id']==x['id']]

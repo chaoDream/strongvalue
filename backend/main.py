@@ -20,12 +20,12 @@ from .compound_takeoff import component_quantity, structured_validator, STRUCTUR
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.39.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.40.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
                 '给排水': '管线平纵断面、材质及埋深', '电气': '配电系统及敷设方式', '合同计价': '合同、计量与取费依据'}
-REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions', 'engineering_structures', 'engineering_settlements', 'integration_trials'}
+REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions', 'engineering_structures', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references'}
 
 
 def password_hash(password, salt=None):
@@ -91,7 +91,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references']:
         p.setdefault(key, [])
     return p
 
@@ -160,6 +160,8 @@ def blockers(p):
     out = [x['specialty']+'资料尚未复核完整' for x in gaps(p) if x['blocking']]
     out.extend(x['message'] for x in allocation_diagnostics(p)['issues'] if x['blocking'])
     out.extend(mapping_issues(p))
+    from .drawing_register import issues as drawing_issues
+    out.extend(drawing_issues(p))
     from .document_requests import task_issues
     out.extend(task_issues(p))
     from .pricing_basis import issues as date_issues
@@ -278,7 +280,8 @@ def view(p):
     from .reconciliation import context_hash
     from .pricing_tasks import tasks
     structure = p['engineering_structures'][-1] if p['engineering_structures'] else None
-    return {**p, 'fact_conflicts':project_facts.conflict_groups(p), 'rule_hash':store.digest(p['rules'][0]) if p['rules'] else '', 'engineering_structure_hash': store.digest(structure) if structure else '', 'pricing_tasks': tasks(p), 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities(), 'document_request_source_issues': source_issues(p), 'pricing_basis_issues': date_issues(p), 'quantity_context_hash': context_hash(p)}
+    from .drawing_register import projection as drawing_projection
+    return {**p, 'drawing_register':drawing_projection(p), 'fact_conflicts':project_facts.conflict_groups(p), 'rule_hash':store.digest(p['rules'][0]) if p['rules'] else '', 'engineering_structure_hash': store.digest(structure) if structure else '', 'pricing_tasks': tasks(p), 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities(), 'document_request_source_issues': source_issues(p), 'pricing_basis_issues': date_issues(p), 'quantity_context_hash': context_hash(p)}
 
 
 class Login(BaseModel):
@@ -870,6 +873,9 @@ def apply_review(c, p, body, a, hash_verified=False):
         raise HTTPException(404, '审核对象不存在')
     if not hash_verified and body.get('object_hash') != store.digest(target):
         raise HTTPException(409, '对象已变更，请刷新后重新复核')
+    if collection in ('drawing_sheets','drawing_references'):
+        from .drawing_register import assert_current
+        assert_current(p,collection,target)
     if collection == 'changes' and target['state'] == 'cancelled':
         raise HTTPException(409, '已取消调量子项不能签署复核，请重新建立调量单')
     if collection == 'document_requests' and target['state'] == 'cancelled':
@@ -907,6 +913,9 @@ def apply_review(c, p, body, a, hash_verified=False):
             if target['state'] not in ('submitted', 'approved'):
                 raise HTTPException(409, '补件任务须先提交补充依据再复核关闭')
             validate_submission(p, target)
+        if collection in ('drawing_sheets','drawing_references'):
+            from .drawing_register import validate_sheet,validate_reference
+            (validate_sheet if collection=='drawing_sheets' else validate_reference)(p,target)
         if collection == 'facts':
             if project_facts.conflicts(p,target):
                 raise HTTPException(409, '先拒绝冲突候选，再核准选定值')
@@ -1014,7 +1023,9 @@ def apply_review(c, p, body, a, hash_verified=False):
                 if b.get('change_id') == target['id']:
                     b['state'] = 'stale'
                     find(p, 'takeoffs', b['takeoff_id'])['state'] = 'stale'
-        if not approve and collection not in ('engineering_settlements', 'integration_trials'):
+        if not approve and collection in ('drawing_sheets','drawing_references'):
+            invalidate(p,'components' if collection=='drawing_sheets' else 'quotes')
+        elif not approve and collection not in ('engineering_settlements', 'integration_trials'):
             if collection == 'boq_mappings':
                 from .boq_mapping import invalidate_dependents
                 invalidate_dependents(p, {target['id']})
@@ -1068,6 +1079,9 @@ def quote(pid: str, a=Depends(actor)):
     edit(a)
     with store.transaction() as c:
         p = project(c, pid, a)
+        from .drawing_register import issues as drawing_issues
+        drawing_errors=drawing_issues(p)
+        if drawing_errors:raise HTTPException(409,'图纸校核尚未完成：'+'；'.join(drawing_errors))
         if not p['boq'] or any(x['state'] != 'approved' for x in p['boq']):
             raise HTTPException(409, '请先审定清单')
         from .engineering_structure import latest as current_structure, issues as structure_issues, validate as validate_structure, rollup
@@ -1108,6 +1122,8 @@ def quote(pid: str, a=Depends(actor)):
         snapshot['catalog']=p['catalog']
         snapshot['quota_adoptions']=p.get('quota_adoptions',[])
         snapshot['enterprise_quota_adoptions']=p['enterprise_quota_adoptions']
+        snapshot['drawing_sheets']=p['drawing_sheets']
+        snapshot['drawing_references']=p['drawing_references']
         from .scoped_rules import validate as validate_scoped
         validate_scoped(p, ruleset)
         result = calculate(p['boq'], ruleset, current_structure(p))
@@ -1148,7 +1164,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.39.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.40.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 def persist_export(c, p, a, format='pdf', quote_id='', template_id='', unpriced=False):
@@ -1286,6 +1302,8 @@ app.include_router(engineering_settlement_router)
 from .delivery import router as delivery_router
 app.include_router(delivery_router)
 
+from .drawing_register import router as drawing_register_router
+app.include_router(drawing_register_router)
 from .report_preview import router as report_preview_router
 app.include_router(report_preview_router)
 
