@@ -32,6 +32,9 @@ def candidates(p,cid):
 
 @precise
 def calculate(comp,source=None):
+    if 'opening_mode' in comp:
+        from .plate_openings import calculate as calculate_openings
+        return calculate_openings(comp,source)
     source=source if source is not None else comp['source_geometry'];role=comp.get('plate_role')
     if comp.get('parameters')!={} or comp.get('quantity_type')!='volume' or not isinstance(role,str) or role not in ROLES or comp.get('scope_confirmed') is not True:
         raise DomainError('井底盖板须为空顶层参数、体积类型，明确板用途并核定圆形板、同心贯通孔及独立标高范围')
