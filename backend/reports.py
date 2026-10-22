@@ -149,9 +149,22 @@ def tables(p, q, approved):
                         c['canonical_value']+' '+c['canonical_unit'], c['rule_version'], part['evidence'][c['parameter']]]
                        for t in snapshot['takeoffs'] for part in t.get('measurement_parts', []) for c in part.get('unit_conversions', [])]
     conversion_rows.extend([[t['name'],c['parameter'],c['original_value'],c['source_unit'],c['factor'],c['canonical_value']+' '+c['canonical_unit'],c['rule_version'],t['evidence'][c['parameter']]]
-                           for t in snapshot['takeoffs'] if t.get('planar_summary') or t.get('spatial_summary') or t.get('surface_summary') or t.get('route_summary') or t.get('trench_summary') or t.get('pipe_summary') or t.get('bedding_summary') or t.get('chamber_summary') for c in t['unit_conversions']])
+                           for t in snapshot['takeoffs'] if t.get('planar_summary') or t.get('spatial_summary') or t.get('surface_summary') or t.get('route_summary') or t.get('trench_summary') or t.get('pipe_summary') or t.get('bedding_summary') or t.get('chamber_summary') or t.get('plate_summary') for c in t['unit_conversions']])
     if conversion_rows:
         result.append(('算量原始单位换算', ['构件','分项 / 参数','原始值','原始单位','换算倍数','标准值 / 单位','单位规则版本','原始证据'], conversion_rows))
+    plates = [t for t in snapshot['takeoffs'] if t.get('plate_summary')]
+    if plates:
+        result.append(('井底盖板净实体汇总', ['井板 / 材料','用途 / 来源井筒版本','选定项数 / 继承板数','原体积 / 孔扣减（m³）','未修约净量 / 工程量（m³）','计量依据与精度'],
+                       [[t['name']+' / '+t['material'],t['plate_summary']['role_label']+' / '+t['plate_summary']['source_name']+' V'+str(t['plate_summary']['source_revision']),
+                         str(t['plate_summary']['well_item_count'])+' / '+t['plate_summary']['plate_count'],t['gross']+' / '+t['deduction'],t['plate_summary']['unrounded_quantity']+' / '+t['quantity'],t['measurement_basis']+'；'+t['rounding_rule']] for t in plates]))
+        result.append(('井板逐项尺寸与孔扣减', ['井板 / 名称 / 来源井号','原始参数 / 单位','标准板径孔径厚度（m）','板底 / 板顶标高（m）','继承井数','单板原体积 / 孔扣减 / 净体积（m³）','本项净体积（m³）'],
+                       [[t['name']+' / '+d['name']+' / '+d['source_well_name'],json.dumps(d['parameters'],ensure_ascii=False)+' / '+d['unit'],
+                         ' / '.join(d['normalized_parameters'][k] for k in ['diameter','opening_diameter','thickness']),d['normalized_parameters']['bottom_z']+' / '+d['top_z'],str(d['source_multiplicity']),
+                         d['single_gross_volume']+' / '+d['single_opening_volume']+' / '+d['single_net_volume'],d['volume']] for t in plates for d in t['plate_sections']]))
+        result.append(('井板标高范围及原件', ['井板 / 名称','来源井号 / 关联站点','独立标高及板孔范围说明','板孔厚标高及范围证据'],
+                       [[t['name']+' / '+d['name'],d['source_well_name']+' / P'+str(d['point_index'])+' '+d['location']['name'],d['measurement_basis'],json.dumps(d['evidence'],ensure_ascii=False)] for t in plates for d in t['plate_sections']]))
+        result.append(('井板材料做法与规则', ['井板','材料施工及依据','π / 修约差额（m³）','规则版本','计量边界'],
+                       [[t['name'],t['material']+'；'+t['construction_basis']+'；'+t['evidence']['plate_material']+'；'+t['evidence']['plate_construction'],t['plate_summary']['pi_constant']+' / '+t['plate_summary']['rounding_adjustment'],t['rule_version'],t['notice']] for t in plates]))
     chambers = [t for t in snapshot['takeoffs'] if t.get('chamber_summary')]
     if chambers:
         result.append(('检查井井筒计量汇总', ['井筒 / 材料','用途 / 工程量（m³）','关联管线 / 版本','定位项数 / 核定井数','未修约材料 / 外包（m³）','计量依据及精度'],
@@ -415,7 +428,7 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if title not in ('检查井井筒计量汇总','井筒逐井尺寸与数量','井筒定位及原始依据','井筒材料做法与规则','管网矩形垫层汇总','垫层逐段尺寸与体积','垫层材料施工与修约','垫层来源设计坐标','管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
+        if title not in ('井底盖板净实体汇总','井板逐项尺寸与孔扣减','井板标高范围及原件','井板材料做法与规则','检查井井筒计量汇总','井筒逐井尺寸与数量','井筒定位及原始依据','井筒材料做法与规则','管网矩形垫层汇总','垫层逐段尺寸与体积','垫层材料施工与修约','垫层来源设计坐标','管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
@@ -471,7 +484,7 @@ def export_report(p, q, fmt, approved, template=None, table_data=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if table_data is not None or title in ('检查井井筒计量汇总','井筒逐井尺寸与数量','井筒定位及原始依据','井筒材料做法与规则','管网矩形垫层汇总','垫层逐段尺寸与体积','垫层材料施工与修约','垫层来源设计坐标','管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
+                if table_data is not None or title in ('井底盖板净实体汇总','井板逐项尺寸与孔扣减','井板标高范围及原件','井板材料做法与规则','检查井井筒计量汇总','井筒逐井尺寸与数量','井筒定位及原始依据','井筒材料做法与规则','管网矩形垫层汇总','垫层逐段尺寸与体积','垫层材料施工与修约','垫层来源设计坐标','管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)
