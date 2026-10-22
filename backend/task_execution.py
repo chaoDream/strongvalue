@@ -3,7 +3,7 @@ import hashlib
 from fastapi import HTTPException
 from . import store
 
-PROMPT_VERSION='drawing-extraction-1.0'
+PROMPT_VERSION='drawing-extraction-1.1'
 
 
 def source_evidence(p,did):

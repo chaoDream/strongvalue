@@ -118,15 +118,34 @@ def dimension_candidates(text):
 
 
 def fact_candidates(text):
+    from .facts import CATALOG, normalize
     patterns = [
-        ('capacity', '处理规模', r'(\d+(?:\.\d+)?)\s*(?:m[³3]|立方米)\s*[/／每]\s*(?:d|日|天)', 'm³/日'),
-        ('duration', '施工工期', r'(\d+)\s*(?:日历天|天工期)', '日历天'),
-        ('supervision_rate', '监理报价费率', r'监理[^\n]{0,35}?(\d+(?:\.\d+)?)\s*[%％]', '%'),
-        ('construction_amount', '施工标金额', r'(?:施工[^\n]{0,25}?(?:中标价|合同价|金额)|施工中标价)[：:\s人民币]*([\d,，]+(?:\.\d{1,2})?)\s*元', '元'),
+        ('capacity', r'(?<![0-9A-Za-z.,，+−﹣－\-])(\d+(?:\.\d+)?)\s*(万?)(?:m[³3]|立方米)\s*[/／每]\s*(?:d|日|天)', None),
+        ('duration', r'(?<![0-9A-Za-z.,，+−﹣－\-])(\d+)\s*(?:日历天|天工期)', '日历天'),
+        ('supervision_rate', r'监理[^\n；;]{0,35}?(?<![0-9A-Za-z.,，+−﹣－\-])(\d+(?:\.\d+)?)\s*[%％]', '%'),
+        ('construction_amount', r'(?:施工中标价|施工中标金额|施工合同价|施工标金额|施工合同金额)[：:\s人民币]*([\d,，]+(?:\.\d{1,12})?)\s*([万亿]?元)', None),
+        ('contract_amount', r'(?:^|[\n；;\t])\s*合同金额[：:\s人民币]*([\d,，]+(?:\.\d{1,12})?)\s*([万亿]?元)', None),
     ]
     out = []
-    for key, label, pattern, unit in patterns:
+    for key, pattern, unit in patterns:
         for match in re.finditer(pattern, text, re.I):
-            out.append({'key': key, 'label': label, 'value': match.group(1).replace(',', '').replace('，', ''),
-                        'unit': unit, 'raw_text': text[max(0, match.start()-20):match.end()+30]})
-    return out
+            if key=='duration':
+                clause=re.split(r'[\n；;]',text[:match.start()])[-1]
+                if '监理' in clause and '施工' not in clause: continue
+            source_unit = unit or (match.group(2)+'m³/日' if key=='capacity' else match.group(2))
+            try: record=normalize(key,match.group(1),source_unit)
+            except ValueError: continue
+            record['raw_text']=match.group(0)
+            out.append(record)
+    # Only labelled, delimited text is extracted. No paragraph inference or date guessing.
+    aliases='|'.join(re.escape(label) for _,_,names in CATALOG.values() for label in names)
+    pattern=r'(?:^|[\n\r；;\t])\s*(?P<label>'+aliases+r')\s*[:：][^\S\r\n\t]*(?P<value>[^\n\r；;\t]+)'
+    for match in re.finditer(pattern,text):
+        key=next(k for k,(_,_,names) in CATALOG.items() if match['label'] in names)
+        value=match['value'].strip()
+        # Adjacent labels without separators are ambiguous; leave them to manual review.
+        if re.search(r'(?:'+aliases+r')\s*[:：]',value) or not value or len(value)>2000: continue
+        record=normalize(key,value)
+        record['raw_text']=match.group(0).strip('\n\r；;\t ')
+        out.append(record)
+    return [f for f in out if len(f['raw_text'])<=2000]

@@ -1,6 +1,7 @@
 from decimal import Decimal
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from . import main as core, store, gateway
+from . import main as core, store, gateway, facts
+from .engine import DomainError
 
 router = APIRouter(prefix='/api/v1')
 
@@ -36,6 +37,12 @@ def analyze_job(pid, did, jid, actor):
             validate_model(p,current_doc,job)
             candidates, rejected = [], []
             for candidate in result['candidates']:
+                normalized = None
+                if candidate['kind']=='fact':
+                    try: normalized=facts.normalize(candidate['key'],candidate['value'],candidate['unit'],known=True)
+                    except DomainError as exc:
+                        rejected.append({'key':candidate['key'],'reason':str(exc)})
+                        continue
                 source = next((e for e in evidence if (e['page'] == candidate['page'] or e['page'] is None) and candidate['quote'] in e['text']), None)
                 # Visual-only candidates require a bounding box and a real PDF page.
                 if source is None and not (candidate['bbox'] and doc['name'].lower().endswith('.pdf') and candidate['page'] <= doc.get('pages', 0)):
@@ -48,12 +55,8 @@ def analyze_job(pid, did, jid, actor):
                 record = {'id': store.uid(), 'document_id': did, 'evidence_id': e['id'], 'state': 'draft', 'analysis_id': jid, 'method': e['method'],
                           'value': candidate['value'], 'unit': candidate['unit'], 'model': result['model']}
                 if candidate['kind'] == 'fact':
-                    record.update(key=candidate['key'], label=candidate['label'], raw_text=candidate['quote'])
-                    conflict = [x for x in p['facts'] if x['key'] == record['key'] and x['value'] != record['value'] and x['state'] not in ('rejected','superseded')]
-                    if conflict:
-                        record['state'] = 'conflict'
-                        for x in conflict: x['state'] = 'conflict'
-                    p['facts'].append(record)
+                    record.update(facts.bind(normalized,e,current_doc,'model',candidate['quote']))
+                    facts.append(p,record)
                 else:
                     record.update(parameter=candidate['key'], component_name=candidate['component_name'], raw_text=candidate['quote'])
                     conflict = [x for x in p['dimension_candidates'] if x['component_name'] and x['component_name'] == record['component_name'] and x['parameter'] == record['parameter'] and Decimal(x['value']) != Decimal(record['value']) and x['state'] not in ('rejected','superseded')]

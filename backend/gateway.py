@@ -106,6 +106,8 @@ def request_gateway(document, raw, evidence):
                'document': {'name': document['name'], 'sha256': document['hash'], 'base64': base64.b64encode(raw).decode()},
                'text_evidence': [{'page': e['page'], 'text': e['text'][:50000]} for e in evidence],
                'response_schema': GatewayResult.model_json_schema()}
+    from .facts import catalog
+    payload['instructions'] += ' Fact keys and explicit accepted units: '+json.dumps(catalog(),ensure_ascii=False)+'. Preserve the quoted source value and unit; the server normalizes them. Confidence is assigned by the application, never approval.'
     if config['protocol'] == 'openai_responses':
         payload = response_payload(config, document, raw, evidence, payload['instructions'])
     headers = {'Content-Type': 'application/json'}

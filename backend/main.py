@@ -18,8 +18,9 @@ from . import store
 from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validate_rules
 from .compound_takeoff import component_quantity, structured_validator, STRUCTURED_KINDS
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
+from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.38.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.39.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -169,6 +170,11 @@ def blockers(p):
     out.extend(scoped_issues(p))
     if any(x['state'] not in ('approved', 'rejected', 'superseded') for x in p['facts']):
         out.append('存在未审核或冲突的工程事实')
+    for fact in p['facts']:
+        if fact['state']=='approved':
+            try: project_facts.validate(p,fact)
+            except (HTTPException,DomainError) as exc:
+                out.append(fact['label']+'：'+str(getattr(exc,'detail',exc)))
     if any(x['state'] == 'conflict' for x in p.get('dimension_candidates', [])):
         out.append('存在跨图尺寸冲突，须逐项专业裁决')
     for key, label in [('components', '尺寸'), ('takeoffs', '工程量'), ('boq', '清单')]:
@@ -272,7 +278,7 @@ def view(p):
     from .reconciliation import context_hash
     from .pricing_tasks import tasks
     structure = p['engineering_structures'][-1] if p['engineering_structures'] else None
-    return {**p, 'rule_hash':store.digest(p['rules'][0]) if p['rules'] else '', 'engineering_structure_hash': store.digest(structure) if structure else '', 'pricing_tasks': tasks(p), 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities(), 'document_request_source_issues': source_issues(p), 'pricing_basis_issues': date_issues(p), 'quantity_context_hash': context_hash(p)}
+    return {**p, 'fact_conflicts':project_facts.conflict_groups(p), 'rule_hash':store.digest(p['rules'][0]) if p['rules'] else '', 'engineering_structure_hash': store.digest(structure) if structure else '', 'pricing_tasks': tasks(p), 'gaps': gaps(p), 'blockers': blockers(p), 'capabilities': capabilities(), 'document_request_source_issues': source_issues(p), 'pricing_basis_issues': date_issues(p), 'quantity_context_hash': context_hash(p)}
 
 
 class Login(BaseModel):
@@ -394,12 +400,7 @@ def parse_job(pid, did, jid, a):
                         for x in conflicts: x['state'] = 'conflict'
                     p['dimension_candidates'].append(candidate)
                 for fact in fact_candidates(text):
-                    conflict = any(f['key'] == fact['key'] and f['value'] != fact['value'] and f['state'] not in ('rejected','superseded') for f in p['facts'])
-                    if conflict:
-                        for f in p['facts']:
-                            if f['key'] == fact['key'] and f['state'] not in ('rejected','superseded'):
-                                f['state'] = 'conflict'
-                    p['facts'].append({**fact, 'id': store.uid(), 'evidence_id': e['id'], 'state': 'conflict' if conflict else 'draft'})
+                    project_facts.append(p, project_facts.bind(fact,e,d,'explicit_text',fact['raw_text']))
             d['parsed'] = True
             d['vector_objects'] = vector_objects
             d['pages'] = len(pages)
@@ -523,22 +524,28 @@ def require_evidence(p, eid):
     return e
 
 
+@app.get('/api/v1/fact-types')
+def fact_types(a=Depends(actor)):
+    return project_facts.catalog()
+
+
 @app.post('/api/v1/projects/{pid}/facts')
 def add_fact(pid: str, body: dict, a=Depends(actor)):
     edit(a)
     with store.transaction() as c:
         p = project(c, pid, a)
-        require_evidence(p, body.get('evidence_id'))
+        evidence = require_evidence(p, body.get('evidence_id'))
         if not all(body.get(k) for k in ['key', 'label', 'value']):
             raise HTTPException(422, '事实字段不完整')
-        f = {k: str(body.get(k, '')) for k in ['key', 'label', 'value', 'unit', 'evidence_id']}
-        f.update(id=store.uid(), state='draft')
-        if any(x['key'] == f['key'] and x['value'] != f['value'] and x['state'] not in ('rejected','superseded') for x in p['facts']):
-            f['state'] = 'conflict'
-            for x in p['facts']:
-                if x['key'] == f['key'] and x['state'] not in ('rejected','superseded'):
-                    x['state'] = 'conflict'
-        p['facts'].append(f)
+        doc = find(p,'documents',evidence['document_id'])
+        from .task_execution import original_bytes
+        original_bytes(doc)
+        f = project_facts.normalize(body['key'],body['value'],body.get('unit',''))
+        if body['key'] not in project_facts.CATALOG:
+            if not isinstance(body['label'],str) or len(body['label'])>100: raise DomainError('事实名称无效')
+            f['label']=body['label']
+        f = project_facts.bind(f,evidence,doc,'manual',body.get('raw_text') or evidence['text'][:2000])
+        project_facts.append(p,f)
         invalidate(p, 'facts')
         store.audit(c, p, a, 'FACT_CREATED', f)
         store.save(c, p)
@@ -901,9 +908,9 @@ def apply_review(c, p, body, a, hash_verified=False):
                 raise HTTPException(409, '补件任务须先提交补充依据再复核关闭')
             validate_submission(p, target)
         if collection == 'facts':
-            if any(f['key'] == target['key'] and f['value'] != target['value'] and f['state'] not in ('rejected','superseded') for f in p['facts']):
+            if project_facts.conflicts(p,target):
                 raise HTTPException(409, '先拒绝冲突候选，再核准选定值')
-            require_evidence(p, target['evidence_id'])
+            project_facts.validate(p,target)
         if collection == 'dimension_candidates':
             require_evidence(p, target['evidence_id'])
             if any(x['component_name'] and x['component_name'] == target['component_name'] and x['parameter'] == target['parameter'] and Decimal(x['value']) != Decimal(target['value']) and x['state'] not in ('rejected','superseded') for x in p['dimension_candidates']):
@@ -1141,7 +1148,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.38.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.39.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 def persist_export(c, p, a, format='pdf', quote_id='', template_id='', unpriced=False):
