@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from . import store
 from .engine import GEOMETRIES, DomainError, number, precise, quantity_number, takeoff
 
-STRUCTURED_KINDS = ('compound','planar_regions','spatial_regions','surface_faces','design_route','station_trench','volume_balance')
+STRUCTURED_KINDS = ('compound','planar_regions','spatial_regions','surface_faces','design_route','station_trench','volume_balance','pipe_envelope')
 VERSION = 'compound-geometry-1.0'
 PI = '3.1415926535897932384626433832795028841971693993751'
 
@@ -132,6 +132,9 @@ def validate(p, comp, saved=False):
 
 
 def structured_validator(kind):
+    if kind == 'pipe_envelope':
+        from .pipe_envelope import validate as validate_pipe
+        return validate_pipe
     if kind == 'volume_balance':
         from .volume_balance import validate as validate_balance
         return validate_balance
@@ -154,6 +157,9 @@ def structured_validator(kind):
 
 
 def component_quantity(comp):
+    if comp['kind'] == 'pipe_envelope':
+        from .pipe_envelope import calculate as calculate_pipe
+        return calculate_pipe(comp)
     if comp['kind'] == 'volume_balance':
         from .volume_balance import calculate as calculate_balance
         return calculate_balance(comp)

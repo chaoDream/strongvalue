@@ -11,6 +11,15 @@ VERSION = 'design-route-1.0'
 NOTICE = '仅按已确认设计中心线的有序XYZ转折点计算三维折线长度；不从示意图测量，不自动连接交叉管线，不计弯头曲线、管件、接口扣减或施工附加量。不同构件间不自动去重；须另行核定计量边界。'
 
 
+SNAPSHOT_FIELDS = ['id','revision','name','kind','parameters','quantity_type','route_points','coordinate_basis',
+                   'coordinate_evidence_id','measurement_basis','basis_evidence_id','multiplicity','multiplicity_evidence_id',
+                   'rounding_digits','rounding_evidence_id']
+
+
+def snapshot(source):
+    return {k: source[k] for k in SNAPSHOT_FIELDS}
+
+
 def overlapping(a, b, c, d):
     """Exact collinearity and positive shared length; touching endpoints is allowed."""
     u = [b[k]-a[k] for k in range(3)]

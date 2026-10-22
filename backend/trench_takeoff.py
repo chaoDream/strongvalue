@@ -6,19 +6,12 @@ from .compound_takeoff import op, text
 from .engine import DomainError, precise, quantity_number
 from .measurement_units import LENGTH, VERSION as UNIT_VERSION
 from .planar_takeoff import linear
-from .route_takeoff import calculate as route_quantity, validate as validate_route
+from .route_takeoff import calculate as route_quantity, validate as validate_route, snapshot
 
 VERSION = 'station-trench-1.0'
 METHODS = {'average_end_area': '平均端面积法', 'linear_prismoidal': '宽深线性变化棱台法'}
 FIELDS = ['bottom_width', 'top_width', 'depth']
-SNAPSHOT_FIELDS = ['id','revision','name','kind','parameters','quantity_type','route_points','coordinate_basis',
-                   'coordinate_evidence_id','measurement_basis','basis_evidence_id','multiplicity','multiplicity_evidence_id',
-                   'rounding_digits','rounding_evidence_id']
 NOTICE = '按已审管线的水平投影分段计量；挖深和断面须独立核定，不从管道高程推断地面或开挖底。平均端面积法是所选近似方法；棱台法仅适用于段内上下宽及挖深分别线性变化的梯形断面。不自动套用放坡、工作面、地质或施工参数，不扣除转角/相邻沟槽重叠，不推算回填或运输。'
-
-
-def snapshot(source):
-    return {k: source[k] for k in SNAPSHOT_FIELDS}
 
 
 def source_component(p, cid):
