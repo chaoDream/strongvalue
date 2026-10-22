@@ -187,9 +187,17 @@ def test_reports_use_frozen_drawing_register_and_new_registration_invalidates_qu
     p=get(e,pid)
     for coll in ['components','takeoffs','boq']:
         for row in p[coll]:approve(r,pid,coll,row)
+    coverage=e.post(base+'/coverage',json={'specialty':'建筑','evidence_id':a['evidence_id'],'reason':'合成图纸与既有单体资料完整性重新核对'}).json()
+    approve(r,pid,'coverage',coverage)
     q=e.post(base+'/quotes/calculate');assert q.status_code==200,q.text
     q=q.json();assert len(q['snapshot']['drawing_sheets'])==2
     frozen=copy.deepcopy(q)
+    approve(r,pid,'quotes',q)
+    approve(r,pid,'drawing_sheets',b)
+    rechecked=get(e,pid)
+    assert rechecked['report_approval'] is None and q['id'] in rechecked['stale_quotes']
+    assert rechecked['status']!='REPORT_APPROVED'
+    assert link['id'] in rechecked['drawing_register']['source_issues']['drawing_references']
     revise(e,pid,'drawing_sheets',b,body(e,pid,doc,2,edition='B',title='新版合成剖面'))
     p=get(e,pid);assert q['id'] in p['stale_quotes'] and all(b['state']=='stale' for b in p['boq'])
     data=e.get(base+'/exports',params={'format':'json','quote_id':q['id']}).json()

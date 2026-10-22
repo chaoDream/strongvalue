@@ -1045,6 +1045,9 @@ def apply_review(c, p, body, a, hash_verified=False):
             p['status'] = 'TAKEOFF_APPROVED' if collection == 'takeoffs' else 'BOQ_APPROVED'
     if collection == 'engineering_structures':
         invalidate(p, 'quotes')
+    if collection in ('drawing_sheets','drawing_references'):
+        # A new review record is an input change even when the row stays approved.
+        invalidate(p, 'quotes')
     if collection == 'document_requests':
         target.update(version=target['version']+1, updated_at=store.now())
         invalidate(p, 'quotes')
