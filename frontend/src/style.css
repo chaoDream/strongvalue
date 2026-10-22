@@ -2746,3 +2746,11 @@ input::placeholder,textarea::placeholder {
 .planar-diagram { margin: 16px 0; border: 1px solid #dce6df; border-radius: 10px; padding: 12px; }
 .planar-diagram svg { width: 100%; max-height: 320px; display: block; }
 .planar-panel td, .planar-modal td { white-space: normal; overflow-wrap: anywhere; }
+
+.mapping-preview table { table-layout:fixed; width:100%; min-width:0; }
+.mapping-preview th,.mapping-preview td { white-space:normal; overflow-wrap:anywhere; padding:12px 14px; vertical-align:top; }
+.mapping-preview th:nth-child(1) { width:22%; }
+.mapping-preview th:nth-child(2) { width:30%; }
+.mapping-preview th:nth-child(3) { width:12%; }
+.mapping-preview th:nth-child(4) { width:36%; }
+.mapping-preview select { width:100%; min-width:0; max-width:100%; }
