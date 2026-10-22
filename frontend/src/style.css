@@ -2754,3 +2754,14 @@ input::placeholder,textarea::placeholder {
 .mapping-preview th:nth-child(3) { width:12%; }
 .mapping-preview th:nth-child(4) { width:36%; }
 .mapping-preview select { width:100%; min-width:0; max-width:100%; }
+
+.report-reader .section-head h2 { display:flex; align-items:center; gap:8px; }
+.report-reader .tool-strip { margin:0 24px 16px; align-items:center; }
+.report-reader .tool-strip .field { margin:0; flex:1; min-width:180px; max-width:640px; }
+.report-file-info { margin:0 24px 16px; padding:14px 16px; background:#f5f8f4; border-radius:6px; font-size:12px; }
+.report-file-info>div { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.report-file-info p { margin:7px 0 0; overflow-wrap:anywhere; }
+.report-reader-nav { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin:0 24px 12px; font-size:12px; }
+.report-reader-nav .field { flex:1; min-width:200px; margin:0; }
+.report-reader>.pdf-app { border-top:1px solid #e5ecdd; }
+.report-reader .pdf-canvas-scroll { max-height:720px; }

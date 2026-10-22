@@ -19,7 +19,7 @@ from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validat
 from .compound_takeoff import component_quantity, structured_validator, STRUCTURED_KINDS
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.37.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.38.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -1141,38 +1141,48 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.37.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.38.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+
+
+def persist_export(c, p, a, format='pdf', quote_id='', template_id='', unpriced=False):
+    from .reports import export_report
+    pid = p['id']
+    if unpriced and quote_id:
+        raise HTTPException(422, '不能同时选择报价版本和当前无价草稿')
+    q = None if unpriced else (find(p, 'quotes', quote_id) if quote_id else (p['quotes'][-1] if p['quotes'] else None))
+    if q and (store.digest(q['snapshot']) != q['input_hash'] or store.digest({k:v for k,v in q.items() if k != 'hash'}) != q['hash']):
+        raise HTTPException(409, '所选报价快照哈希不一致，不能生成成果文件')
+    approved = bool(q and p['report_approval'] and p['report_approval']['quote_id'] == q['id'] and q['id'] not in p['stale_quotes'] and not blockers(p))
+    from .templates import find_template
+    template = find_template(c, template_id, a['tenant']) if template_id else None
+    pagination = {}
+    if format == 'zip':
+        from .delivery import export_bundle
+        payload, media, suffix = export_bundle(c, p, q, template)
+    else:
+        payload, media, suffix = export_report(p, q, format, approved, template, pagination=pagination)
+    sha = hashlib.sha256(payload).hexdigest()
+    directory = store.ROOT/'exports'
+    directory.mkdir(exist_ok=True)
+    path = directory/sha
+    if not path.exists():
+        path.write_bytes(payload)
+    artifact = {'id': store.uid(), 'format': format, 'quote_id': q['id'] if q else None, 'quote_version': q['version'] if q else None,
+                'hash': sha, 'approved': approved, 'timestamp': store.now(), 'actor': a['username'], 'media': media, 'suffix': suffix}
+    if pagination: artifact['pdf_manifest'] = pagination
+    artifact['report_context'] = {'project_name':q['project_name'] if q else p['name'], 'scope':q['scope'] if q else p['scope'], 'quote_hash':q['hash'] if q else None}
+    artifact.update(template=template, template_hash=store.digest(template) if template else None)
+    c.execute('INSERT INTO artifacts VALUES(?,?,?,?)', (artifact['id'], pid, a['tenant'], store.canonical(artifact)))
+    store.audit(c, p, a, 'EXPORT_COMPLETED', artifact)
+    return artifact, payload
 
 
 @app.get('/api/v1/projects/{pid}/exports')
 def export(pid: str, format: str = 'json', quote_id: str = '', template_id: str = '', unpriced: bool = False, a=Depends(actor)):
-    from .reports import export_report
     with store.transaction() as c:
-        p = project(c, pid, a)
-        if unpriced and quote_id:
-            raise HTTPException(422, '不能同时选择报价版本和当前无价草稿')
-        q = None if unpriced else (find(p, 'quotes', quote_id) if quote_id else (p['quotes'][-1] if p['quotes'] else None))
-        approved = bool(q and p['report_approval'] and p['report_approval']['quote_id'] == q['id'] and q['id'] not in p['stale_quotes'] and not blockers(p))
-        from .templates import find_template
-        template = find_template(c, template_id, a['tenant']) if template_id else None
-        if format == 'zip':
-            from .delivery import export_bundle
-            payload, media, suffix = export_bundle(c, p, q, template)
-        else:
-            payload, media, suffix = export_report(p, q, format, approved, template)
-        sha = hashlib.sha256(payload).hexdigest()
-        directory = store.ROOT/'exports'
-        directory.mkdir(exist_ok=True)
-        path = directory/sha
-        if not path.exists():
-            path.write_bytes(payload)
-        artifact = {'id': store.uid(), 'format': format, 'quote_id': q['id'] if q else None, 'quote_version': q['version'] if q else None,
-                    'hash': sha, 'approved': approved, 'timestamp': store.now(), 'actor': a['username'], 'media': media, 'suffix': suffix}
-        artifact.update(template=template, template_hash=store.digest(template) if template else None)
-        c.execute('INSERT INTO artifacts VALUES(?,?,?,?)', (artifact['id'], pid, a['tenant'], store.canonical(artifact)))
-        store.audit(c, p, a, 'EXPORT_COMPLETED', artifact)
-    return StreamingResponse(io.BytesIO(payload), media_type=media,
-                             headers={'Content-Disposition': 'attachment; filename="QiangQuote-'+(q['id'][:8] if q else 'unpriced')+'.'+suffix+'"', 'X-Artifact-Hash': sha})
+        artifact, payload = persist_export(c, project(c, pid, a), a, format, quote_id, template_id, unpriced)
+    return StreamingResponse(io.BytesIO(payload), media_type=artifact['media'],
+                             headers={'Content-Disposition': 'attachment; filename="QiangQuote-'+(artifact['quote_id'][:8] if artifact['quote_id'] else 'unpriced')+'.'+artifact['suffix']+'"', 'X-Artifact-Hash': artifact['hash'], 'X-Artifact-ID': artifact['id']})
 
 
 @app.get('/api/v1/projects/{pid}/artifacts')
@@ -1268,6 +1278,9 @@ from .engineering_settlements import router as engineering_settlement_router
 app.include_router(engineering_settlement_router)
 from .delivery import router as delivery_router
 app.include_router(delivery_router)
+
+from .report_preview import router as report_preview_router
+app.include_router(report_preview_router)
 
 dist = Path(__file__).parent.parent/'frontend'/'dist'
 if dist.exists():

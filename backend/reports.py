@@ -466,7 +466,7 @@ def tables(p, q, approved):
     return watermark, result
 
 
-def export_report(p, q, fmt, approved, template=None, table_data=None):
+def export_report(p, q, fmt, approved, template=None, table_data=None, pagination=None):
     label, sections = table_data if table_data is not None else tables(p, q, approved)
     if template:
         sections[0][2].extend([['编制单位', template['organization']], ['企业模板', template['name']+' V'+str(template['version'])],
@@ -539,7 +539,9 @@ def export_report(p, q, fmt, approved, template=None, table_data=None):
         for title, headers, rows in sections:
             if story:
                 story.append(PageBreak())
-            story.extend([Paragraph(escape(title), title_style), para(label), Spacer(1, 6*mm)])
+            heading = Paragraph(escape(title), title_style)
+            heading.report_section = title
+            story.extend([heading, para(label), Spacer(1, 6*mm)])
             # Bound huge evidence excerpts and wrap unbroken hashes.
             content = [[Paragraph(escape(h), header_style) for h in headers]]+[[para(str(v)) for v in row] for row in rows]
             if len(content) == 1:
@@ -559,7 +561,19 @@ def export_report(p, q, fmt, approved, template=None, table_data=None):
                 canvas.drawString(18*mm, 8*mm, template['footer'])
             canvas.drawRightString(278*mm, 12*mm, str(doc.page))
             canvas.restoreState()
-        doc = SimpleDocTemplate(output, pagesize=(297*mm,210*mm), leftMargin=18*mm,rightMargin=18*mm,topMargin=17*mm,bottomMargin=20*mm)
+        entries = []
+        class ReportDocument(SimpleDocTemplate):
+            def afterFlowable(self, flowable):
+                title = getattr(flowable, 'report_section', None)
+                if title:
+                    key = 'section-'+str(len(entries)+1)
+                    self.canv.bookmarkPage(key)
+                    self.canv.addOutlineEntry(title, key, level=0, closed=False)
+                    entries.append({'title': title, 'page': self.page})
+        doc = ReportDocument(output, pagesize=(297*mm,210*mm), leftMargin=18*mm,rightMargin=18*mm,topMargin=17*mm,bottomMargin=20*mm)
         doc.build(story, onFirstPage=page, onLaterPages=page)
+        if pagination is not None:
+            pagination.update(schema='report-pagination-v1', page_count=doc.page,
+                              sections=[{**v, 'end_page': entries[i+1]['page']-1 if i+1<len(entries) else doc.page} for i,v in enumerate(entries)])
         return output.getvalue(), 'application/pdf', 'pdf'
     raise HTTPException(422, '支持 pdf、xlsx、json；专有软件交换格式尚未验证')
