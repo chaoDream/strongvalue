@@ -2,7 +2,7 @@ import React,{useState} from 'react';
 import {Plus,X,Trash2} from 'lucide-react';
 type Obj=Record<string,any>;
 const excavationKinds=['trench','station_trench','spatial_regions','planar_regions','compound'];
-const occupationKinds=['pipe_envelope','slab','walls','masonry','ring','spatial_regions','planar_regions','compound'];
+const occupationKinds=['route_bedding','pipe_envelope','slab','walls','masonry','ring','spatial_regions','planar_regions','compound'];
 const states:Obj={draft:'待复核',approved:'已审定',stale:'已失效',rejected:'已拒绝',needs_info:'待补件'};
 function F({label,children}:any){return <label className="field"><span>{label}</span>{children}</label>}
 

@@ -149,9 +149,24 @@ def tables(p, q, approved):
                         c['canonical_value']+' '+c['canonical_unit'], c['rule_version'], part['evidence'][c['parameter']]]
                        for t in snapshot['takeoffs'] for part in t.get('measurement_parts', []) for c in part.get('unit_conversions', [])]
     conversion_rows.extend([[t['name'],c['parameter'],c['original_value'],c['source_unit'],c['factor'],c['canonical_value']+' '+c['canonical_unit'],c['rule_version'],t['evidence'][c['parameter']]]
-                           for t in snapshot['takeoffs'] if t.get('planar_summary') or t.get('spatial_summary') or t.get('surface_summary') or t.get('route_summary') or t.get('trench_summary') or t.get('pipe_summary') for c in t['unit_conversions']])
+                           for t in snapshot['takeoffs'] if t.get('planar_summary') or t.get('spatial_summary') or t.get('surface_summary') or t.get('route_summary') or t.get('trench_summary') or t.get('pipe_summary') or t.get('bedding_summary') for c in t['unit_conversions']])
     if conversion_rows:
         result.append(('算量原始单位换算', ['构件','分项 / 参数','原始值','原始单位','换算倍数','标准值 / 单位','单位规则版本','原始证据'], conversion_rows))
+    beddings = [t for t in snapshot['takeoffs'] if t.get('bedding_summary')]
+    if beddings:
+        result.append(('管网矩形垫层汇总', ['垫层 / 材料','来源管线 / 版本','单组未修约（m³）','重复数量 / 工程量（m³）','范围依据','规则及精度'],
+                       [[t['name']+' / '+t['material'],t['bedding_summary']['source_name']+' / V'+str(t['bedding_summary']['source_revision']),t['bedding_summary']['single_volume'],
+                         t['bedding_summary']['multiplicity']+' / '+t['quantity'],t['measurement_basis'],t['rule_version']+'；'+t['rounding_rule']] for t in beddings]))
+        result.append(('垫层逐段尺寸与体积', ['垫层 / 段','起点 → 终点','原始宽厚 / 单位','标准宽厚（m）','水平长 / 三维长（m）','断面积 / 单组体积','范围及证据'],
+                       [[t['name']+' / S'+str(d['segment_index']),d['from_name']+' → '+d['to_name'],json.dumps(d['parameters'],ensure_ascii=False)+' / '+d['unit'],
+                         d['normalized_parameters']['width']+' / '+d['normalized_parameters']['thickness'],d['horizontal_length']+' / '+d['spatial_length'],
+                         d['cross_section_area']+' m² / '+d['single_volume']+' m³',d['measurement_basis']+'；'+json.dumps(d['evidence'],ensure_ascii=False)] for t in beddings for d in t['bedding_sections']]))
+        result.append(('垫层材料施工与修约', ['垫层','材料规格及依据','施工做法及依据','修约差额及依据','边界说明'],
+                       [[t['name'],t['material']+'；'+t['evidence']['bedding_material'],t['construction_basis']+'；'+t['evidence']['bedding_construction'],
+                         t['bedding_summary']['rounding_adjustment']+' m³；'+t['evidence']['bedding_rounding'],t['notice']] for t in beddings]))
+        result.append(('垫层来源设计坐标', ['垫层 / 来源点','原始XYZ','单位','XYZ证据'],
+                       [[t['name']+' / P'+str(i+1)+' '+p['name'],json.dumps(p['parameters'],ensure_ascii=False),p['unit'],json.dumps(p['evidence'],ensure_ascii=False)]
+                        for t in beddings for i,p in enumerate(t['source_geometry']['route_points'])]))
     pipes = [t for t in snapshot['takeoffs'] if t.get('pipe_summary')]
     if pipes:
         result.append(('管道外包体积汇总', ['管道占位','来源管线 / 版本','单组未修约（m³）','重复数量 / 工程量（m³）','范围依据','规则及精度'],
@@ -385,7 +400,7 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if title not in ('管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
+        if title not in ('管网矩形垫层汇总','垫层逐段尺寸与体积','垫层材料施工与修约','垫层来源设计坐标','管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
@@ -441,7 +456,7 @@ def export_report(p, q, fmt, approved, template=None, table_data=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if table_data is not None or title in ('管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
+                if table_data is not None or title in ('管网矩形垫层汇总','垫层逐段尺寸与体积','垫层材料施工与修约','垫层来源设计坐标','管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)
