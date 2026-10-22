@@ -131,6 +131,9 @@ def validate(p, comp, saved=False):
 
 
 def structured_validator(kind):
+    if kind == 'station_trench':
+        from .trench_takeoff import validate as validate_trench
+        return validate_trench
     if kind == 'design_route':
         from .route_takeoff import validate as validate_route
         return validate_route
@@ -147,6 +150,9 @@ def structured_validator(kind):
 
 
 def component_quantity(comp):
+    if comp['kind'] == 'station_trench':
+        from .trench_takeoff import calculate as calculate_trench
+        return calculate_trench(comp)
     if comp['kind'] == 'design_route':
         from .route_takeoff import calculate as calculate_route
         return calculate_route(comp)

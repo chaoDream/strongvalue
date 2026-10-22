@@ -148,9 +148,27 @@ def tables(p, q, approved):
                         c['canonical_value']+' '+c['canonical_unit'], c['rule_version'], part['evidence'][c['parameter']]]
                        for t in snapshot['takeoffs'] for part in t.get('measurement_parts', []) for c in part.get('unit_conversions', [])]
     conversion_rows.extend([[t['name'],c['parameter'],c['original_value'],c['source_unit'],c['factor'],c['canonical_value']+' '+c['canonical_unit'],c['rule_version'],t['evidence'][c['parameter']]]
-                           for t in snapshot['takeoffs'] if t.get('planar_summary') or t.get('spatial_summary') or t.get('surface_summary') or t.get('route_summary') for c in t['unit_conversions']])
+                           for t in snapshot['takeoffs'] if t.get('planar_summary') or t.get('spatial_summary') or t.get('surface_summary') or t.get('route_summary') or t.get('trench_summary') for c in t['unit_conversions']])
     if conversion_rows:
         result.append(('算量原始单位换算', ['构件','分项 / 参数','原始值','原始单位','换算倍数','标准值 / 单位','单位规则版本','原始证据'], conversion_rows))
+    trenches = [t for t in snapshot['takeoffs'] if t.get('trench_summary')]
+    if trenches:
+        labels = {'method_label':'断面法','single_volume':'单组未修约体积（m³）','multiplicity':'来源重复数量','station_count':'断面数量',
+                  'unrounded_quantity':'总量修约前（m³）','rounding_digits':'总量修约小数位','rounding_adjustment':'修约差额（m³）'}
+        result.append(('变断面沟槽汇总', ['沟槽','字段','内容'],
+                       [[t['name'],label,str(t['trench_summary'][key])] for t in trenches for key,label in labels.items()]+
+                       [[t['name'],key,value] for t in trenches for key,value in [('来源',t['trench_summary']['source_name']+' / V'+str(t['trench_summary']['source_revision'])),
+                         ('工程量',t['quantity']+' m³'),('坐标依据',t['coordinate_basis']),('计量依据',t['measurement_basis']),('地质场地',t['geology_basis']),
+                         ('施工工作面',t['construction_basis']),('算法与精度',t['rule_version']+'；'+t['rounding_rule']),('适用边界',t['notice'])]]))
+        result.append(('沟槽站点断面', ['沟槽 / 来源点','原始底宽顶宽挖深','原始单位','标准值（m）','断面积（m²）','断面说明与证据'],
+                       [[t['name']+' / P'+str(s['point_index'])+' '+s['point_name'],json.dumps(s['parameters'],ensure_ascii=False),s['unit'],
+                         json.dumps(s['normalized_parameters'],ensure_ascii=False),s['area'],s['measurement_basis']+'；'+json.dumps(s['evidence'],ensure_ascii=False)] for t in trenches for s in t['trench_stations']]))
+        result.append(('沟槽分段体积', ['沟槽 / 段','起点 → 终点','水平长 / 空间长（m）','起 / 终面积（m²）','线性中断面 / 计算均值（m²）','未修约体积（m³）'],
+                       [[t['name']+' / S'+str(s['index']),s['from_name']+' → '+s['to_name'],s['horizontal_length']+' / '+s['spatial_length'],s['start_area']+' / '+s['end_area'],
+                         s['mid_area']+' / '+s['mean_area'],s['volume']] for t in trenches for s in t['trench_segments']]))
+        result.append(('沟槽来源坐标', ['沟槽 / 来源点','原始XYZ','原始单位','XYZ证据'],
+                       [[t['name']+' / P'+str(i+1)+' '+p['name'],json.dumps(p['parameters'],ensure_ascii=False),p['unit'],json.dumps(p['evidence'],ensure_ascii=False)]
+                        for t in trenches for i,p in enumerate(t['source_geometry']['route_points'])]))
     routes = [t for t in snapshot['takeoffs'] if t.get('route_summary')]
     if routes:
         labels = {'point_count':'转折点数量','segment_count':'管段数量','single_length':'单组未修约长度（m）','multiplicity':'整组重复数量',
@@ -338,7 +356,7 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if title not in ('设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
+        if title not in ('变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
@@ -394,7 +412,7 @@ def export_report(p, q, fmt, approved, template=None, table_data=None):
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if table_data is not None or title in ('设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
+                if table_data is not None or title in ('变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)

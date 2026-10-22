@@ -19,7 +19,7 @@ from .engine import DomainError, takeoff, calculate, number, GEOMETRIES, validat
 from .compound_takeoff import component_quantity, structured_validator
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.29.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.30.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -173,7 +173,7 @@ def blockers(p):
         if not any(r['state'] == 'approved' and r['passed'] and matches_context(p,r) for r in p.get('reconciliations', [])):
             out.append('缺少覆盖当前工程量的已审专业黄金底稿对照')
     for comp in p['components']:
-        if comp['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route'):
+        if comp['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route','station_trench'):
             try:
                 structured_validator(comp['kind'])(p, comp, saved=True)
             except (HTTPException, DomainError) as exc:
@@ -534,16 +534,18 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
     with store.transaction() as c:
         p = project(c, pid, a)
         old = find(p, 'components', cid) if cid else None
-        compound = body.get('kind') in ('compound','planar_regions','spatial_regions','surface_faces','design_route')
-        if old and (compound or old['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route')):
+        compound = body.get('kind') in ('compound','planar_regions','spatial_regions','surface_faces','design_route','station_trench')
+        if old and (compound or old['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route','station_trench')):
             if body.get('object_hash') != store.digest(old):
                 raise HTTPException(409, '构件已变化，请刷新后再修订')
-            if not compound or old['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route') and body['kind'] != old['kind']:
+            if not compound or old['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route','station_trench') and body['kind'] != old['kind']:
                 raise HTTPException(409, '结构化构件须通过原编辑器修订，不能静默改类型或丢弃扣减明细')
         if compound:
             result, stamp = structured_validator(body['kind'])(p, body)
             fields = ['name', 'kind', 'parameters', 'measurement_basis', 'basis_evidence_id']
-            if body['kind'] == 'design_route':
+            if body['kind'] == 'station_trench':
+                fields += ['quantity_type','source_component_id','source_component_hash','stations','method','geology_basis','geology_evidence_id','construction_basis','construction_evidence_id','rounding_digits','rounding_evidence_id']
+            elif body['kind'] == 'design_route':
                 fields += ['route_points','quantity_type','coordinate_basis','coordinate_evidence_id','multiplicity','multiplicity_evidence_id','rounding_digits','rounding_evidence_id']
             elif body['kind'] == 'surface_faces':
                 fields += ['quantity_type','purpose','source_component_id','source_component_hash','face_decisions']
@@ -553,7 +555,7 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
             if body['kind']=='planar_regions' and body['quantity_type']=='volume': fields += ['thickness','thickness_unit','thickness_evidence_id']
             comp = {k: body[k] for k in fields}
             comp.update(evidence=result['source_evidence'], source_stamp=stamp)
-            if body['kind'] == 'surface_faces': comp['source_geometry'] = result['source_geometry']
+            if body['kind'] in ('surface_faces','station_trench'): comp['source_geometry'] = result['source_geometry']
         else:
             result = takeoff(body.get('kind'), body.get('parameters', {}))
             required_parameters = set(GEOMETRIES[body['kind']]['fields']) | {'deduction'}
@@ -568,7 +570,7 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
             if not body.get('name') or not body.get('measurement_basis'):
                 raise HTTPException(422, '构件名称和计量/扣减依据必填')
             comp = {k: body[k] for k in ['name', 'kind', 'parameters', 'evidence', 'measurement_basis']}
-        invalidate(p, 'takeoffs' if body['kind']=='surface_faces' else 'components')
+        invalidate(p, 'takeoffs' if body['kind'] in ('surface_faces','station_trench') else 'components')
         comp.update(id=cid or store.uid(), revision=old['revision']+1 if old else 1, state='draft', preview=result)
         if old:
             p.setdefault('component_history', []).append(dict(old))
@@ -581,6 +583,13 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
         store.audit(c, p, a, 'COMPONENT_UPDATED' if old else 'COMPONENT_CREATED', comp)
         store.save(c, p)
     return comp
+
+
+@app.get('/api/v1/projects/{pid}/trench-station-candidates')
+def trench_station_candidates(pid: str, component_id: str, a=Depends(actor)):
+    from .trench_takeoff import candidates
+    with store.connect() as c:
+        return candidates(project(c, pid, a), component_id)
 
 
 @app.get('/api/v1/projects/{pid}/surface-face-candidates')
@@ -603,7 +612,7 @@ def preview_component(pid: str, body: dict, a=Depends(actor)):
     edit(a)
     with store.connect() as c:
         p = project(c, pid, a)
-        if body.get('kind') not in ('compound','planar_regions','spatial_regions','surface_faces','design_route'):
+        if body.get('kind') not in ('compound','planar_regions','spatial_regions','surface_faces','design_route','station_trench'):
             raise HTTPException(422, '此预览用于分项、区域、表面或设计管线算量')
         result, stamp = structured_validator(body['kind'])(p, body)
     return {**result, 'source_stamp': stamp}
@@ -619,7 +628,7 @@ def calculate_takeoff(pid: str, a=Depends(actor)):
         if not p['components'] or any(x['state'] != 'approved' for x in p['components']):
             raise HTTPException(409, '所有构件尺寸需先经专业复核')
         for comp in p['components']:
-            if comp['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route'): structured_validator(comp['kind'])(p, comp, saved=True)
+            if comp['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route','station_trench'): structured_validator(comp['kind'])(p, comp, saved=True)
         invalidate(p, 'boq')
         # Retain old calculation books; current version is the only BOQ input.
         p.setdefault('takeoff_history', []).extend(p['takeoffs'])
@@ -835,7 +844,7 @@ def apply_review(c, p, body, a, hash_verified=False):
             if any(x['component_name'] and x['component_name'] == target['component_name'] and x['parameter'] == target['parameter'] and Decimal(x['value']) != Decimal(target['value']) and x['state'] not in ('rejected','superseded') for x in p['dimension_candidates']):
                 raise HTTPException(409, '同构件同参数存在冲突值，请先拒绝不采纳候选')
         if collection == 'components':
-            if target['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route'):
+            if target['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route','station_trench'):
                 structured_validator(target['kind'])(p, target, saved=True)
             for eid in target['evidence'].values():
                 require_evidence(p, eid)
@@ -848,7 +857,7 @@ def apply_review(c, p, body, a, hash_verified=False):
                 comp = find(p, 'components', target['component_id'])
                 if comp['state'] != 'approved' or target['component_hash'] != store.digest(comp):
                     raise HTTPException(409, '构件已变化，请重新算量')
-                if comp['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route'):
+                if comp['kind'] in ('compound','planar_regions','spatial_regions','surface_faces','design_route','station_trench'):
                     result, _ = structured_validator(comp['kind'])(p, comp, saved=True)
                     if any(target.get(k) != value for k, value in result.items()):
                         raise HTTPException(409, '计算书与构件明细不一致，请重新算量')
@@ -1067,7 +1076,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.29.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.30.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 @app.get('/api/v1/projects/{pid}/exports')
