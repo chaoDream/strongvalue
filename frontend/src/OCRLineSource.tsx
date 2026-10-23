@@ -1,5 +1,6 @@
 import React,{useState,useEffect,useRef} from 'react';
 import {createPortal} from 'react-dom';
+import TranscriptionFacts from './TranscriptionFacts';
 import DocumentPreview from './DocumentPreview';
 import {regionSpace,validBox} from './evidenceRegion';
 type Obj=Record<string,any>;
@@ -31,5 +32,5 @@ export function OCRLineList({pid,evidence,request,canTranscribe=false,onTranscri
  const [offset,setOffset]=useState(0);
  useEffect(()=>setOffset(0),[pid,evidence.id]);
  const lines=evidence.ocr?.lines||[],start=Math.min(offset,Math.max(0,Math.floor((lines.length-1)/50)*50));
- return <><div style={{maxHeight:320,overflow:'auto'}}>{lines.slice(start,start+50).map((line:Obj,i:number)=><div key={i+start}><p><b>第{start+i+1}行：</b>{line.text}</p><OCRLineSource pid={pid} evidenceId={evidence.id} line={line} number={start+i+1} request={request} canTranscribe={canTranscribe} onTranscribed={onTranscribed}/>{transcriptions.filter(e=>e.ocr_transcription.source_location.line===start+i+1).map(e=><details key={e.id}><summary>人工抄录：{e.text.slice(0,60)}</summary><p>{e.text}</p><p>{e.ocr_transcription.reason}</p><small>{e.ocr_transcription.created_by} · {e.ocr_transcription.created_at} · 证据 {e.id}</small></details>)}</div>)}</div>{lines.length>50&&<div className="actions"><button type="button" className="text-btn" disabled={start===0} onClick={()=>setOffset(start-50)}>上一批原行</button><span>{start+1}—{Math.min(start+50,lines.length)} / {lines.length}行</span><button type="button" className="text-btn" disabled={start+50>=lines.length} onClick={()=>setOffset(start+50)}>下一批原行</button></div>}</>
+ return <><div style={{maxHeight:320,overflow:'auto'}}>{lines.slice(start,start+50).map((line:Obj,i:number)=><div key={i+start}><p><b>第{start+i+1}行：</b>{line.text}</p><OCRLineSource pid={pid} evidenceId={evidence.id} line={line} number={start+i+1} request={request} canTranscribe={canTranscribe} onTranscribed={onTranscribed}/>{transcriptions.filter(e=>e.ocr_transcription.source_location.line===start+i+1).map(e=><details key={e.id}><summary>人工抄录：{e.text.slice(0,60)}</summary><p>{e.text}</p><p>{e.ocr_transcription.reason}</p><small>{e.ocr_transcription.created_by} · {e.ocr_transcription.created_at} · 证据 {e.id}</small><div><TranscriptionFacts pid={pid} evidenceId={e.id} editable={canTranscribe} request={request} onChanged={onTranscribed}/></div></details>)}</div>)}</div>{lines.length>50&&<div className="actions"><button type="button" className="text-btn" disabled={start===0} onClick={()=>setOffset(start-50)}>上一批原行</button><span>{start+1}—{Math.min(start+50,lines.length)} / {lines.length}行</span><button type="button" className="text-btn" disabled={start+50>=lines.length} onClick={()=>setOffset(start+50)}>下一批原行</button></div>}</>
 }

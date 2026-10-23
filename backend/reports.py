@@ -142,6 +142,12 @@ def tables(p, q, approved):
               t['original_line']['text'],e['text'],t['reason'],t['created_by']+' / '+t['created_at'],
               e['document_hash']+' / 第'+str(e['page'])+'页 / '+str(e['bbox'])]
              for e in transcriptions for t in [e['ocr_transcription']]]))
+    adopted_facts=[f for f in snapshot['facts'] if f.get('transcription_adoption')]
+    if adopted_facts:
+        result.append(('人工抄录事实采用',['事实字段 / 候选','原始值 / 单位','标准值 / 单位','采用依据','采用人 / 时间','来源证据 / 原文'],
+            [[f['label']+' / '+a['candidate']['id'],f['original_value']+' '+f['original_unit'],f['value']+' '+f['unit'],
+              a['reason'],a['created_by']+' / '+a['created_at'],f['evidence_id']+' / '+f['raw_text']]
+             for f in adopted_facts for a in [f['transcription_adoption']]]))
     if snapshot.get('facts'):
         fact_states={'draft':'待复核','approved':'已审定','rejected':'不采纳','superseded':'历史替代','conflict':'存在冲突','stale':'需重新复核','needs_info':'待补依据'}
         result.insert(1,('项目事实与冲突候选', ['字段 / 候选ID','原始值 / 单位','标准值 / 单位','候选类别 / 审核状态','来源文件 / 页码','证据ID / 原文'],
