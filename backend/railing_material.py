@@ -14,6 +14,7 @@ from .railing_posts import calculate as post_quantity,ranges as post_ranges,NOTI
 
 from .additional_posts import calculate as added_post_quantity,NOTICE as ADDED_POST_NOTICE,EQUAL_NOTICE as EQUAL_ADDED_POST_NOTICE
 
+from .post_spacing import calculate as spacing_quantity,NOTICE as SPACING_NOTICE
 from .post_adjustments import calculate as adjusted_post_quantity,NOTICE as ADJUSTED_POST_NOTICE,EQUAL_NOTICE as EQUAL_ADJUSTED_POST_NOTICE,COMBINED_NOTICE,COMBINED_MODES
 
 VERSION='railing-material-mass-1.0'
@@ -68,6 +69,7 @@ def calculate(comp,source=None):
         if not isinstance(item,dict) or not isinstance(item.get('mode'),str) or item['mode'] not in MODES:raise DomainError('材料项须明确连续构件、独立定长构件、均分立柱或矩形/异形直边板网片')
         spaced=item['mode'] in ('spaced_posts','fixed_posts','fixed_added_posts','spaced_added_posts','fixed_adjusted_posts','spaced_adjusted_posts','fixed_added_adjusted_posts','spaced_added_adjusted_posts');cut=item['mode'] in ('cut_pieces','spaced_posts','fixed_posts','fixed_added_posts','spaced_added_posts','fixed_adjusted_posts','spaced_adjusted_posts','fixed_added_adjusted_posts','spaced_added_adjusted_posts');polygon=item['mode']=='polygon_panels';panel=item['mode'] in ('rect_panels','polygon_panels')
         fields=(common-{'quantity'} if spaced else common)|({'post_ranges','cut_length','length_unit'} if spaced else {'polygon_rings','coordinate_basis'} if polygon else {'length','width','length_unit','openings'} if panel else {'cut_length','length_unit'} if cut else set())
+        if spaced and 'spacing_check' in item:fields.add('spacing_check')
         proofs=({'unit_weight','measurement_basis'} if spaced else {'quantity','unit_weight','measurement_basis'})|({'coordinate_basis'} if polygon else {'length','width'} if panel else {'cut_length'} if cut else set())
         if set(item)!=fields or not isinstance(item['evidence'],dict) or set(item['evidence'])!=proofs:raise DomainError('材料项字段与逐参数依据须完整且仅包含当前模式所需内容')
         name=text(item['name'],'材料项名称',200)
@@ -78,6 +80,9 @@ def calculate(comp,source=None):
             layout=(adjusted_post_quantity if item['mode'] in ('fixed_adjusted_posts','spaced_adjusted_posts','fixed_added_adjusted_posts','spaced_added_adjusted_posts') else added_post_quantity if item['mode'] in ('fixed_added_posts','spaced_added_posts') else post_quantity)(item,r,'material.'+str(i)+'.posts.')
             post_count+=layout['post_count']
             if post_count>5000:raise DomainError('每表最多5000根单组自动布置立柱，请拆分实际范围')
+            spacing_check=spacing_quantity(item['spacing_check'],layout,r,item['mode'],'material.'+str(i)+'.spacing_check') if 'spacing_check' in item else None
+            if spacing_check:
+                dimensions.update(spacing_check['dimensions']);refs.update(spacing_check['source_evidence']);conversions.extend(spacing_check['unit_conversions'])
             count=Decimal(layout['post_count'])
             dimensions.update(layout['dimensions']);refs.update(layout['source_evidence']);conversions.extend(layout['unit_conversions'])
         else:count=number(item['quantity'],True)
@@ -113,7 +118,7 @@ def calculate(comp,source=None):
         stock_length=length*count;mass=stock_length*weight;total+=mass
         ast=op('multiply',length_ast,layout['formula_ast'] if spaced else {'dimension':key+'.quantity'},weight_ast);nodes.append(ast)
         rows.append({**item,'index':i,'normalized_quantity':str(count),'normalized_unit_weight':str(weight),
-                     'single_member_length':str(length),'single_group_stock_length':str(stock_length),'single_group_mass':str(mass),'formula_ast':ast,**({'quantity':str(count),'post_layout':layout} if spaced else {})})
+                     'single_member_length':str(length),'single_group_stock_length':str(stock_length),'single_group_mass':str(mass),'formula_ast':ast,**({'quantity':str(count),'post_layout':layout,**({'post_spacing':spacing_check} if spacing_check else {})} if spaced else {})})
     has_combined=any(v['mode'] in COMBINED_MODES for v in items)
     has_equal_adjusted=any(v['mode']=='spaced_adjusted_posts' for v in items)
     has_adjusted=any(v['mode']=='fixed_adjusted_posts' for v in items)
@@ -125,7 +130,7 @@ def calculate(comp,source=None):
     has_panels=any(v['mode'] in ('rect_panels','polygon_panels') for v in items)
     groups=Decimal(summary['multiplicity']);gross=quantity_number(total*groups)
     quantity=quantity_number(gross.quantize(Decimal(1).scaleb(-digits),rounding=ROUND_HALF_UP))
-    return {'quantity':str(quantity),'unit':'kg','gross':str(gross),'deduction':'0','parameters':{},
+    output={'quantity':str(quantity),'unit':'kg','gross':str(gross),'deduction':'0','parameters':{},
             'formula':('Σ[核定下料长 × 含构造加柱移后保留根数 × 每米质量；及其他材料分项质量]' if has_combined else 'Σ[核定下料长 × 均分移柱后保留根数 × 每米质量；及其他材料分项质量]' if has_equal_adjusted else 'Σ[核定下料长 × 移柱后保留根数 × 每米质量；及其他材料分项质量]' if has_adjusted else 'Σ[核定下料长 × (原规则布柱数＋指定构造加柱数) × 每米质量；及其他材料分项质量]' if has_equal_added else 'Σ[核定下料长 × (定距柱数＋指定构造加柱数) × 每米质量；及其他材料分项质量]' if has_added else 'Σ[核定下料长 × 逐区间定距留余跨立柱数 × 每米质量；及其他材料分项质量]' if has_fixed else 'Σ[核定下料长 × 逐区间均分立柱数 × 每米质量；及其他材料分项质量]' if has_posts else 'Σ[单片净展开面积 × 每组片数 × 单位面积质量；或线材下料长 × 每组数量 × 单位长度质量]' if has_panels else 'Σ[单道或单件下料长 × 每组道数或件数 × 单位长度质量]')+' × '+str(groups)+'；仅总质量修约'+str(digits)+'位',
             'formula_ast':{'op':'round','args':[op('multiply',op('add',*nodes),{'dimension':'multiplicity'})],'digits':digits,'mode':'HALF_UP'},
             'dimensions':dimensions,'source_evidence':refs,'unit_conversions':conversions,'coordinate_basis':r['coordinate_basis'],
@@ -136,6 +141,11 @@ def calculate(comp,source=None):
                                 'single_group_mass':str(total),'multiplicity':str(groups),'unrounded_quantity':str(gross),
                                 'rounding_digits':digits,'rounding_adjustment':str(quantity-gross)},
             'rule_version':'railing-material-mass-1.9' if has_combined else 'railing-material-mass-1.8' if has_equal_adjusted else 'railing-material-mass-1.7' if has_adjusted else 'railing-material-mass-1.6' if has_equal_added else 'railing-material-mass-1.5' if has_added else 'railing-material-mass-1.4' if has_fixed else 'railing-material-mass-1.3' if has_posts else 'railing-material-mass-1.2' if has_polygons else 'railing-material-mass-1.1' if has_panels else VERSION,'rounding_rule':ROUNDING+('；板件单片净展开面积与分项质量均不修约' if has_panels else ''),'notice':COMBINED_NOTICE+('；'+EQUAL_ADJUSTED_POST_NOTICE if has_equal_adjusted else '')+('；'+ADJUSTED_POST_NOTICE if has_adjusted else '')+('；'+EQUAL_ADDED_POST_NOTICE if has_equal_added else '')+('；'+ADDED_POST_NOTICE if has_added else '')+('；'+FIXED_POST_NOTICE if has_fixed else '')+('；'+POST_NOTICE if any(v['mode']=='spaced_posts' for v in items) else '')+('；'+PANEL_MATERIAL_NOTICE+'；'+POLYGON_PANEL_NOTICE if has_panels else '') if has_combined else EQUAL_ADJUSTED_POST_NOTICE+('；'+ADJUSTED_POST_NOTICE if has_adjusted else '')+('；'+EQUAL_ADDED_POST_NOTICE if has_equal_added else '')+('；'+ADDED_POST_NOTICE if has_added else '')+('；'+FIXED_POST_NOTICE if has_fixed else '')+('；'+POST_NOTICE if any(v['mode']=='spaced_posts' for v in items) else '')+('；'+PANEL_MATERIAL_NOTICE+'；'+POLYGON_PANEL_NOTICE if has_panels else '') if has_equal_adjusted else ADJUSTED_POST_NOTICE+('；'+EQUAL_ADDED_POST_NOTICE if has_equal_added else '')+('；'+ADDED_POST_NOTICE if has_added else '')+('；'+FIXED_POST_NOTICE if has_fixed else '')+('；'+POST_NOTICE if any(v['mode']=='spaced_posts' for v in items) else '')+('；'+PANEL_MATERIAL_NOTICE+'；'+POLYGON_PANEL_NOTICE if has_panels else '') if has_adjusted else EQUAL_ADDED_POST_NOTICE+('；'+ADDED_POST_NOTICE if has_added else '')+('；'+FIXED_POST_NOTICE if has_fixed else '')+('；'+POST_NOTICE if any(v['mode']=='spaced_posts' for v in items) else '')+('；'+PANEL_MATERIAL_NOTICE+'；'+POLYGON_PANEL_NOTICE if has_panels else '') if has_equal_added else ADDED_POST_NOTICE+('；'+FIXED_POST_NOTICE if has_fixed else '')+('；'+POST_NOTICE if any(v['mode']=='spaced_posts' for v in items) else '')+('；'+PANEL_MATERIAL_NOTICE+'；'+POLYGON_PANEL_NOTICE if has_panels else '') if has_added else FIXED_POST_NOTICE+('；'+POST_NOTICE if any(v['mode']=='spaced_posts' for v in items) else '')+('；'+PANEL_MATERIAL_NOTICE+'；'+POLYGON_PANEL_NOTICE if has_panels else '') if has_fixed else POST_NOTICE+('；'+PANEL_MATERIAL_NOTICE+'；'+POLYGON_PANEL_NOTICE if has_panels else '') if has_posts else PANEL_MATERIAL_NOTICE+'；'+POLYGON_PANEL_NOTICE if has_polygons else PANEL_MATERIAL_NOTICE if has_panels else NOTICE}
+
+    if any('spacing_check' in item for item in items):
+        output['rule_version']='railing-material-mass-1.10'
+        output['notice']=SPACING_NOTICE+'；'+output['notice']
+    return output
 
 
 def validate(p,comp,saved=False):

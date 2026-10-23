@@ -467,6 +467,15 @@ def tables(p, q, approved):
     if combined_adjustments:
         result.append(('含加柱移柱规则与范围',['材料表 / 材料项','完整规则、适用边界及版本'],
                        [[t['name']+' / '+v['name'],v['post_layout']['notice']+'；'+v['post_layout']['rule_version']+'；原规则柱'+str(v['post_layout']['base_post_count'])+'根＋原构造加柱'+str(v['post_layout']['additional_post_count'])+'根，移柱'+str(v['post_layout']['moved_post_count'])+'根，禁布范围'+str(v['post_layout']['avoidance_range_count'])+'个'] for t,v in combined_adjustments]))
+    checked_posts=[(t,v) for t in materials for v in t['material_items'] if 'post_spacing' in v]
+    if checked_posts:
+        from .post_spacing import expression as post_distance_expression
+        result.append(('立柱区间实际柱距',['材料表 / 材料项 / 区间','计入柱 / 相邻对','区间最大实际柱距（m）','核定上限（m）','起端 / 终端未归属距离（m）','局部结论'],
+                       [[t['name']+' / '+v['name']+' / '+r['label'],str(r['post_count'])+' / '+str(r['pair_count']),r['max_distance'] or '无相邻对',v['post_spacing']['normalized_limit'],'整区间无计入柱' if r['fully_unposted'] else r['unposted_start_distance']+' / '+r['unposted_end_distance'],'已列相邻对不超过上限；端部及跨区间、跨边另核' if r['pair_count'] else '无相邻对，须另核'] for t,v in checked_posts for r in v['post_spacing']['ranges']]))
+        result.append(('立柱相邻柱距明细',['材料表 / 材料项 / 区间','相邻柱及身份','起终端距S（m）','实际柱距（m）','核定上限（m）','精确距离表达式'],
+                       [[t['name']+' / '+v['name']+' / '+r['label'],'柱'+str(a['from_post'])+' '+a['from_identity']+' → 柱'+str(a['to_post'])+' '+a['to_identity'],a['from_s']+' → '+a['to_s'],a['distance'],v['post_spacing']['normalized_limit'],post_distance_expression(a['exact_distance'])] for t,v in checked_posts for r in v['post_spacing']['ranges'] for a in r['pairs']]))
+        result.append(('立柱柱距核查依据',['材料表 / 材料项','上限原值、范围说明及依据'],
+                       [[t['name']+' / '+v['name'],str(v['spacing_check']['max_spacing'])+' '+v['spacing_check']['spacing_unit']+'；'+v['spacing_check']['measurement_basis']+'；上限依据：'+v['spacing_check']['evidence']['max_spacing']+'；范围依据：'+v['spacing_check']['evidence']['measurement_basis']+'；'+v['post_spacing']['notice']+'；'+v['post_spacing']['rule_version']] for t,v in checked_posts]))
     def railing_edge_label(e):
         return 'S'+str(e['edge_index']) if e['role']=='route' else 'R'+str(e['ring_index'])+' E'+str(e['edge_index'])
     railings = [t for t in snapshot['takeoffs'] if t.get('railing_summary')]
@@ -800,7 +809,7 @@ def export_report(p, q, fmt, approved, template=None, table_data=None, paginatio
             # Keep a post's identifier and complete 80-digit station on one page.
             # Other sections still permit oversized evidence rows to split.
             t = Table(content, colWidths=[260*mm/len(headers)]*len(headers), repeatRows=1,
-                      splitInRow=0 if title in ('立柱逐根端距','定距立柱逐根端距') else 1)
+                      splitInRow=0 if title in ('立柱逐根端距','定距立柱逐根端距','立柱相邻柱距明细') else 1)
             t.setStyle(TableStyle([('BACKGROUND', (0,0),(-1,0),colors.HexColor('#'+template['accent'] if template else '#DFEBE6')),
                                   ('GRID',(0,0),(-1,-1),.3,colors.HexColor('#C7D6D0')),
                                   ('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),5),
