@@ -9,7 +9,8 @@ from .engine import precise
 from .dxf_geometry import parse,route_body,VERSION
 from .planar_takeoff import linear
 from .task_execution import original_bytes
-from .dxf_assembly import SourcePart,AssemblyIn,assemble,rebuild,source_ids
+from .dxf_assembly import SourcePart,AssemblyIn,assemble,rebuild
+from .dxf_fragments import FragmentIn,fragment,overlaps
 
 router=APIRouter(prefix='/api/v1')
 Text=Annotated[str,StringConstraints(strict=True,strip_whitespace=True,min_length=1,max_length=2000)]
@@ -43,6 +44,7 @@ class PreviewIn(BaseModel):
     component_id:Text|None=None
     component_hash:Hash|None=None
     segments:list[SourcePart]|None=Field(default=None,min_length=2,max_length=20)
+    fragment:FragmentIn|None=None
 
 
 class AdoptIn(PreviewIn):
@@ -50,8 +52,8 @@ class AdoptIn(PreviewIn):
 
 
 def request_payload(body):
-    # Preserve pre-assembly request hashes for retries of v0.49 operations.
-    return body.model_dump(exclude={'segments'} if body.segments is None else set())
+    # Preserve older single-object and assembly request hashes.
+    return body.model_dump(exclude={key for key in ('segments','fragment') if getattr(body,key) is None})
 
 
 def document(p,did):
@@ -94,7 +96,10 @@ def calibration(row,body):
 
 def evaluate(p,did,cid,body):
     doc,data,items=rows(p,did)
-    row=assemble(items,body['segments']) if body.get('segments') is not None else next((r for r in items if r['id']==cid),None)
+    if body.get('segments') is not None and body.get('fragment') is not None:raise HTTPException(422,'单对象取段与多对象组装不能同时提交')
+    if body.get('fragment') is not None:row=fragment(items,body['fragment'])
+    elif body.get('segments') is not None:row=assemble(items,body['segments'])
+    else:row=next((r for r in items if r['id']==cid),None)
     if not row or row['id']!=cid or store.digest(row)!=body['object_hash']:raise HTTPException(409,'DXF候选、任务或原件已变化，请重新读取')
     if not row['eligible']:raise HTTPException(422,row['issue'])
     proof={k:evidence_proof(p,body[k+'_evidence_id']) for k in ('basis','calibration')}
@@ -121,6 +126,15 @@ def read(pid:str,did:str,layer:str=Query('',max_length=2000),offset:int=Query(0,
         batch=items[offset:offset+limit]
         return {'scene':project(batch,projection),'document_name':doc['name'],'unit':data['unit'],'insunits':data['insunits'],'layers':layers,'ignored':data['ignored'],'notice':data['notice'],
                 'total':len(items),'offset':offset,'limit':limit,'candidates':[{**r,'object_hash':store.digest(r)} for r in batch]}
+
+
+@router.post('/projects/{pid}/documents/{did}/dxf-route-fragment')
+def read_fragment(pid:str,did:str,body:FragmentIn,a=Depends(core.actor)):
+    with store.connect() as conn:
+        p=core.project(conn,pid,a);doc,data,items=rows(p,did)
+        row=fragment(items,body.model_dump())
+        return {'candidate':{**row,'object_hash':store.digest(row)},'document_name':doc['name'],
+                'notice':'只按明确原始顶点范围读取完整管段，不插值、不补段；采用前仍须独立长度校核与用途确认。'}
 
 
 @router.post('/projects/{pid}/documents/{did}/dxf-route-assembly')
@@ -154,8 +168,8 @@ def adopt(pid:str,did:str,cid:str,body:AdoptIn,a=Depends(core.actor)):
         if store.digest(result)!=body.preview_hash:raise HTTPException(409,'DXF校核预览或依据已变化，请重新预览')
         if not result['calibration']['passed']:raise HTTPException(409,'CAD两点距离与已知长度不符，禁止采用或自动缩放')
         row=result['candidate'];old=core.find(p,'components',body.component_id) if body.component_id else None
-        if any(source_ids(c['dxf_trace']['candidate']) & source_ids(row) and c['id']!=body.component_id for c in p['components'] if c.get('dxf_trace')):
-            raise HTTPException(409,'此CAD对象已有管线登记，请选择原管线修订，不能重复计长')
+        if any(c['id']!=body.component_id and overlaps(c['dxf_trace']['candidate'],row) for c in p['components'] if c.get('dxf_trace')):
+            raise HTTPException(409,'所选CAD原始管段已有管线登记，请选择原管线修订或不重叠的顶点范围，不能重复计长')
         eid=store.uid();trace={'version':VERSION,'candidate':row,'scope':{k:payload[k] for k in SCOPE},'calibration':result['calibration'],'calibration_input':body.calibration.model_dump(),
                               'proofs':result['proofs'],'source_confirmed':True,'reason':body.reason,'author':a['username'],'created_at':store.now(),'evidence_id':eid}
         ev={'id':eid,'document_id':did,'document_hash':row['document_hash'],'page':None,'bbox':None,'method':'dxf_geometry',
@@ -184,7 +198,8 @@ def adopt(pid:str,did:str,cid:str,body:AdoptIn,a=Depends(core.actor)):
 
 
 def evidence_text(row):
-    return 'DXF '+row['kind']+' / 句柄 '+row['handle']+' / 图层 '+row['layer']+' / WCS '+store.canonical(row['points'])+' '+row['unit']
+    scope=row.get('fragment');suffix=(' / 原顶点 P'+str(scope['from_point'])+'—P'+str(scope['to_point'])+' / '+('反向' if scope['reverse'] else '原方向')) if scope else ''
+    return 'DXF '+row['kind']+' / 句柄 '+row['handle']+' / 图层 '+row['layer']+' / WCS '+store.canonical(row['points'])+' '+row['unit']+suffix
 
 
 def validate_geometry_evidence(p,e):

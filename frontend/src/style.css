@@ -2799,3 +2799,6 @@ input::placeholder,textarea::placeholder {
 .dxf-located-object { margin-top:16px; padding:16px; border:1px solid #dfd2bd; border-radius:8px; background:#fffdf9; overflow-wrap:anywhere; }
 .dxf-located-object .actions { flex-wrap:wrap; }
 @media(max-width:700px) { .dxf-source-view { margin:12px 8px; padding:12px; } .dxf-source-toolbar label { width:100%; } }
+
+.dxf-fragment-selector { margin:14px 0; padding:14px; border:1px solid #d9e4dc; border-radius:8px; background:#f8fbf7; }
+.dxf-fragment-selector > .btn { margin-top:12px; }

@@ -142,6 +142,13 @@ def tables(p, q, approved):
               'P'+str(t['calibration']['from_point'])+'–P'+str(t['calibration']['to_point'])+'：'+t['calibration']['known_distance_m']+'m / '+t['calibration']['cad_distance_m']+'m',
               t['calibration']['tolerance_m']+'m / '+t['calibration']['delta_m']+'m',t['reason']+' / 校核证据 '+t['proofs']['calibration']['evidence_id'],
               t['author']+' / '+t['created_at']] for x in dxf_routes for t in [x['trace']]]))
+    fragments=[(x,x['trace']['candidate']) for x in dxf_routes if x['trace']['candidate'].get('kind')=='FRAGMENT']
+    if fragments:
+        result.append(('DXF原对象取段范围',['管线 / 修订','原对象 / 图层','原始范围 / 方向','取段点 → 原始点','采用起点 → 终点','单组长度 / 原件哈希'],
+            [[x.get('component_name',x['component_id'])+' / V'+str(x['component_revision']),r['source_object']['kind']+' '+r['handle']+' / '+r['layer'],
+              'P'+str(r['fragment']['from_point'])+'—P'+str(r['fragment']['to_point'])+' / '+('反向' if r['fragment']['reverse'] else '原方向'),
+              '；'.join('P'+str(i+1)+'→原P'+str(v) for i,v in enumerate(r['source_point_indices'])),
+              canonical(r['points'][0])+' → '+canonical(r['points'][-1])+' '+r['unit'],r['single_length_m']+'m / '+r['document_hash']] for x,r in fragments]))
     assembled=[(x,x['trace']['candidate']) for x in dxf_routes if x['trace']['candidate'].get('kind')=='ASSEMBLY']
     if assembled:
         result.append(('DXF多对象组装来源',['管线 / 修订','顺序 / 方向','原对象 / 图层','组装点范围','原始起点 → 终点','原单位 / 文件哈希'],

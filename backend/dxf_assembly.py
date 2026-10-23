@@ -66,6 +66,9 @@ def assemble(items,segments):
 
 def rebuild(items,candidate):
     try:
+        if candidate.get('kind')=='FRAGMENT':
+            from .dxf_fragments import fragment
+            return fragment(items,candidate.get('fragment'))
         if candidate.get('kind')=='ASSEMBLY':return assemble(items,candidate.get('selection'))
         return next((r for r in items if r['id']==candidate.get('id')),None)
     except (KeyError,TypeError,ValueError,HTTPException):
