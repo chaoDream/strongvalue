@@ -54,7 +54,7 @@ def original_bytes(doc):
     return raw
 
 
-def fail(pid,did,jid,actor,token,exc,model=False):
+def fail(pid,did,jid,actor,token,exc,model=False,failure_event=None):
     from . import main as core
     with store.transaction() as c:
         p=core.task_project(c,pid,actor);job=core.find(p,'jobs',jid)
@@ -62,5 +62,5 @@ def fail(pid,did,jid,actor,token,exc,model=False):
         message=str(getattr(exc,'detail',exc))[:300]
         job.update(state='failed',message=message,finished_at=store.now())
         if not model:core.find(p,'documents',did)['parse_state']='failed'
-        store.audit(c,p,actor,'MODEL_ANALYSIS_FAILED' if model else 'PARSE_FAILED',{'job_id':jid,'document_id':did,'execution_id':token,'reason':message})
+        store.audit(c,p,actor,failure_event or ('MODEL_ANALYSIS_FAILED' if model else 'PARSE_FAILED'),{'job_id':jid,'document_id':did,'execution_id':token,'reason':message})
         store.save(c,p)

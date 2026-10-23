@@ -20,7 +20,7 @@ from .compound_takeoff import component_quantity, structured_validator, STRUCTUR
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.41.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.42.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -475,12 +475,18 @@ def retry(pid: str, jid: str, tasks: BackgroundTasks, a=Depends(actor)):
         doc=find(p,'documents',j['document_id'])
         validate_source(doc,j)
         if j.get('kind') == 'model_analysis':validate_model(p,doc,j)
+        if j.get('kind') == 'local_ocr':
+            from .ocr import validate_job
+            validate_job(p,doc,j)
         j.update(state='queued',message='已申请重试，等待执行',finished_at=None)
         store.audit(c,p,a,'JOB_RETRY_REQUESTED',{'job_id':jid,'previous_attempts':j.get('attempts',0)})
         store.save(c, p)
     if j.get('kind') == 'model_analysis':
         from .analysis_routes import analyze_job
         tasks.add_task(analyze_job, pid, j['document_id'], jid, a)
+    elif j.get('kind') == 'local_ocr':
+        from .ocr import ocr_job
+        tasks.add_task(ocr_job, pid, j['document_id'], jid, a)
     else:
         tasks.add_task(parse_job, pid, j['document_id'], jid, a)
     return j
@@ -1167,7 +1173,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.41.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.42.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 def persist_export(c, p, a, format='pdf', quote_id='', template_id='', unpriced=False):
@@ -1311,6 +1317,9 @@ from .drawing_register import router as drawing_register_router
 app.include_router(drawing_register_router)
 from .report_preview import router as report_preview_router
 app.include_router(report_preview_router)
+
+from .ocr import router as ocr_router
+app.include_router(ocr_router)
 
 dist = Path(__file__).parent.parent/'frontend'/'dist'
 if dist.exists():
