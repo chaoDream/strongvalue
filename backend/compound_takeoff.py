@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from . import store
 from .engine import GEOMETRIES, DomainError, number, precise, quantity_number, takeoff
 
-STRUCTURED_KINDS = ('compound','planar_regions','polygon_region','spatial_regions','surface_faces','design_route','station_trench','volume_balance','pipe_envelope','route_bedding','circular_chamber','chamber_plate')
+STRUCTURED_KINDS = ('compound','planar_regions','polygon_region','spatial_regions','surface_faces','design_route','station_trench','volume_balance','pipe_envelope','route_bedding','circular_chamber','chamber_plate','polygon_railing')
 VERSION = 'compound-geometry-1.0'
 PI = '3.1415926535897932384626433832795028841971693993751'
 
@@ -132,6 +132,9 @@ def validate(p, comp, saved=False):
 
 
 def structured_validator(kind):
+    if kind == 'polygon_railing':
+        from .railing_takeoff import validate as validate_railing
+        return validate_railing
     if kind == 'polygon_region':
         from .polygon_takeoff import validate as validate_polygon
         return validate_polygon
@@ -169,6 +172,9 @@ def structured_validator(kind):
 
 
 def component_quantity(comp):
+    if comp['kind'] == 'polygon_railing':
+        from .railing_takeoff import calculate as calculate_railing
+        return calculate_railing(comp)
     if comp['kind'] == 'polygon_region':
         from .polygon_takeoff import calculate as calculate_polygon
         return calculate_polygon(comp)

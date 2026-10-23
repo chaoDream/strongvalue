@@ -230,7 +230,7 @@ def tables(p, q, approved):
                         c['canonical_value']+' '+c['canonical_unit'], c['rule_version'], part['evidence'][c['parameter']]]
                        for t in snapshot['takeoffs'] for part in t.get('measurement_parts', []) for c in part.get('unit_conversions', [])]
     conversion_rows.extend([[t['name'],c['parameter'],c['original_value'],c['source_unit'],c['factor'],c['canonical_value']+' '+c['canonical_unit'],c['rule_version'],t['evidence'][c['parameter']]]
-                           for t in snapshot['takeoffs'] if t.get('polygon_summary') or t.get('planar_summary') or t.get('spatial_summary') or t.get('surface_summary') or t.get('route_summary') or t.get('trench_summary') or t.get('pipe_summary') or t.get('bedding_summary') or t.get('chamber_summary') or t.get('plate_summary') for c in t['unit_conversions']])
+                           for t in snapshot['takeoffs'] if t.get('railing_summary') or t.get('polygon_summary') or t.get('planar_summary') or t.get('spatial_summary') or t.get('surface_summary') or t.get('route_summary') or t.get('trench_summary') or t.get('pipe_summary') or t.get('bedding_summary') or t.get('chamber_summary') or t.get('plate_summary') for c in t['unit_conversions']])
     if conversion_rows:
         result.append(('算量原始单位换算', ['构件','分项 / 参数','原始值','原始单位','换算倍数','标准值 / 单位','单位规则版本','原始证据'], conversion_rows))
     plates = [t for t in snapshot['takeoffs'] if t.get('plate_summary')]
@@ -386,6 +386,18 @@ def tables(p, q, approved):
                          for t in spatial for i in t['spatial_intersections']]
         if intersections:
             result.append(('空间相交定位', ['构件', '加扣', '长方体A', '长方体B', '两两相交体积（m³）', '说明'], intersections))
+    railings = [t for t in snapshot['takeoffs'] if t.get('railing_summary')]
+    if railings:
+        labels={'available_length':'候选原边总长（m）','single_length':'单组核定长度（m）','multiplicity':'来源重复数量','unrounded_quantity':'修约前总长（m）','rounding_digits':'总长修约位数','rounding_adjustment':'修约差额（m）'}
+        result.append(('栏杆边线长度汇总',['栏杆','字段','内容'],
+                       [[t['name'],label,str(t['railing_summary'][key])] for t in railings for key,label in labels.items()]+
+                       [[t['name'],key,value] for t in railings for key,value in [('来源',t['railing_summary']['source_name']+' / V'+str(t['railing_summary']['source_revision'])),('工程量',t['quantity']+' m'),('材料做法',t['material']),('安装依据',t['installation_basis']),('计量依据',t['measurement_basis']),('算法及精度',t['rule_version']+'；'+t['rounding_rule']),('适用边界',t['notice'])]]))
+        result.append(('栏杆逐边范围核定',['栏杆 / 原边','轮廓及原点序','起终XY（m）','原边长（m）','决定 / 计入长（m）','计量说明','原始依据'],
+                       [[t['name']+' / R'+str(e['ring_index'])+' E'+str(e['edge_index']),('外轮廓' if e['role']=='outer' else '孔')+' / P'+str(e['from_index'])+'→P'+str(e['to_index']),json.dumps(e['from_xy'])+' → '+json.dumps(e['to_xy']),e['length'],{'exclude':'排除','full':'整边','ranges':'局部区间'}[e['mode']]+' / '+e['selected_length'],e['basis'],e['evidence_id']] for t in railings for e in t['railing_edges']]))
+        ranges=[[t['name']+' / R'+str(e['ring_index'])+' E'+str(e['edge_index']),v['from']+' → '+v['to']+' '+v['unit'],v['s_from']+' → '+v['s_to'],v['length'],v['from_evidence_id']+' / '+v['to_evidence_id']] for t in railings for e in t['railing_edges'] for v in e['normalized_ranges']]
+        if ranges:result.append(('栏杆局部计长区间',['栏杆 / 原边','原始起终距','标准S区间（m）','长度（m）','起终距依据'],ranges))
+        result.append(('栏杆来源原始坐标',['栏杆 / 轮廓','原图顶点','原始XY / 单位','逐坐标依据'],
+                       [[t['name']+' / R'+str(i),p['name'],json.dumps(p['parameters'])+' '+p['unit'],json.dumps(p['evidence'])] for t in railings for i,r in enumerate(t['source_geometry']['polygon_rings'],1) for p in r['points']]))
     surfaces = [t for t in snapshot['takeoffs'] if t.get('surface_summary')]
     if surfaces:
         result.append(('表面计量汇总', ['构件', '用途', '来源空间构件 / 版本', '单组边界面积', '单组计入 / 排除面积', '重复数量 / 工程量', '计量依据', '来源版本哈希'],

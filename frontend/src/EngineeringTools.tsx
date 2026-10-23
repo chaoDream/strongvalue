@@ -22,6 +22,7 @@ const VolumeBalancePanel=React.lazy(()=>import('./VolumeBalancePanel'));
 const TrenchTakeoffPanel=React.lazy(()=>import('./TrenchTakeoffPanel'));
 const DXFRoutesPanel=React.lazy(()=>import('./DXFRoutesPanel'));
 const RouteTakeoffPanel=React.lazy(()=>import('./RouteTakeoffPanel'));
+const RailingTakeoffPanel=React.lazy(()=>import('./RailingTakeoffPanel'));
 const SurfaceTakeoffPanel=React.lazy(()=>import('./SurfaceTakeoffPanel'));
 const SpatialTakeoffPanel=React.lazy(()=>import('./SpatialTakeoffPanel'));
 const PlanarTakeoffPanel=React.lazy(()=>import('./PlanarTakeoffPanel'));
@@ -132,6 +133,7 @@ export default function EngineeringTools({section,p,user,request,refresh,onRevie
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取CAD坐标…</p>}><DXFRoutesPanel key={p.id} p={p} user={user} request={request} refresh={refresh}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取设计管线…</p>}><RouteTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取空间构件…</p>}><SpatialTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
+  {section==='takeoff'&&<React.Suspense fallback={<p>正在读取栏杆计长…</p>}><RailingTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取表面算量…</p>}><SurfaceTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取设计多边形…</p>}><PolygonTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取平面区域…</p>}><PlanarTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}

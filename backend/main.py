@@ -21,7 +21,7 @@ from .compound_takeoff import component_quantity, structured_validator, STRUCTUR
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.64.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.65.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -593,7 +593,9 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
         if compound:
             result, stamp = structured_validator(body['kind'])(p, body)
             fields = ['name', 'kind', 'parameters', 'measurement_basis', 'basis_evidence_id']
-            if body['kind'] == 'chamber_plate':
+            if body['kind'] == 'polygon_railing':
+                fields += ['quantity_type','source_component_id','source_component_hash','edge_decisions','scope_confirmed','material','material_evidence_id','installation_basis','installation_evidence_id','rounding_digits','rounding_evidence_id']
+            elif body['kind'] == 'chamber_plate':
                 fields += ['quantity_type','plate_role','source_component_id','source_component_hash','plate_sections','scope_confirmed','material','material_evidence_id','construction_basis','construction_evidence_id','rounding_digits','rounding_evidence_id']
                 if 'opening_mode' in body: fields += ['opening_mode']
             elif body['kind'] == 'circular_chamber':
@@ -619,7 +621,7 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
             if body['kind'] in ('planar_regions','polygon_region') and body['quantity_type']=='volume': fields += ['thickness','thickness_unit','thickness_evidence_id']
             comp = {k: body[k] for k in fields}
             comp.update(evidence=result['source_evidence'], source_stamp=stamp)
-            if body['kind'] in ('surface_faces','station_trench','volume_balance','pipe_envelope','route_bedding','circular_chamber','chamber_plate'): comp['source_geometry'] = result['source_geometry']
+            if body['kind'] in ('polygon_railing','surface_faces','station_trench','volume_balance','pipe_envelope','route_bedding','circular_chamber','chamber_plate'): comp['source_geometry'] = result['source_geometry']
         else:
             result = takeoff(body.get('kind'), body.get('parameters', {}))
             required_parameters = set(GEOMETRIES[body['kind']]['fields']) | {'deduction'}
@@ -634,7 +636,7 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
             if not body.get('name') or not body.get('measurement_basis'):
                 raise HTTPException(422, '构件名称和计量/扣减依据必填')
             comp = {k: body[k] for k in ['name', 'kind', 'parameters', 'evidence', 'measurement_basis']}
-        invalidate(p, 'takeoffs' if body['kind'] in ('surface_faces','station_trench','volume_balance','pipe_envelope','route_bedding','circular_chamber','chamber_plate') else 'components')
+        invalidate(p, 'takeoffs' if body['kind'] in ('polygon_railing','surface_faces','station_trench','volume_balance','pipe_envelope','route_bedding','circular_chamber','chamber_plate') else 'components')
         if old: invalidate_component_dependents(p, cid)
         comp.update(id=cid or store.uid(), revision=old['revision']+1 if old else 1, state='draft', preview=result)
         if old:
@@ -649,6 +651,13 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
         store.audit(c, p, a, 'COMPONENT_UPDATED' if old else 'COMPONENT_CREATED', comp)
         store.save(c, p)
     return comp
+
+
+@app.get('/api/v1/projects/{pid}/railing-edge-candidates')
+def railing_edge_candidates(pid: str, component_id: str, a=Depends(actor)):
+    from .railing_takeoff import candidates
+    with store.connect() as c:
+        return candidates(project(c, pid, a), component_id)
 
 
 @app.get('/api/v1/projects/{pid}/chamber-plate-candidates')
