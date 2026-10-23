@@ -1,4 +1,4 @@
-"""Independent rectangular foundations, one per approved laid-out post."""
+"""Independent solid foundations, one per approved laid-out post."""
 from decimal import Decimal,ROUND_HALF_UP
 from fastapi import HTTPException
 from . import store
@@ -8,6 +8,7 @@ from .measurement_units import LENGTH,VERSION as UNIT_VERSION
 from .planar_takeoff import linear
 from .railing_material import calculate as material_quantity,validate as validate_material,snapshot
 from .surface_takeoff import check_sources
+from . import foundation_steps,foundation_round
 
 VERSION='railing-post-foundation-1.0'
 PARAMS=('length','width','height')
@@ -28,7 +29,7 @@ def eligible(r):return [v for v in r['material_items'] if 'post_layout' in v]
 def candidates(p,cid):
     s=source_component(p,cid);r=material_quantity(s);items=eligible(r)
     if not items:raise DomainError('该材料表没有已核定布置的立柱项，独立定长件不能推定为立柱')
-    from .foundation_steps import NOTICE as SHAPE_NOTICE
+    from .foundation_round import NOTICE as SHAPE_NOTICE
     return dict(source_component_id=s['id'],source_component_hash=store.digest(snapshot(s)),source_name=s['name'],source_revision=s['revision'],multiplicity=r['material_summary']['multiplicity'],post_items=[dict(material_index=v['index'],material_name=v['name'],mode=v['mode'],post_count=v['post_layout']['post_count']) for v in items],notice=SHAPE_NOTICE)
 
 
@@ -58,8 +59,8 @@ def calculate(comp,source=None):
         i=d['material_index']
         if i not in available or i in by_index:raise DomainError('基础来源立柱项重复、过期或不适用；只接受已核定布置的立柱')
         if stepped:
-            from .foundation_steps import validate_row
-            validate_row(d)
+            if d['shape'] in foundation_round.SHAPES:foundation_round.validate_row(d)
+            else:foundation_steps.validate_row(d)
         elif not isinstance(d['parameters'],dict) or set(d['parameters'])!=set(PARAMS) or not isinstance(d['evidence'],dict) or set(d['evidence'])!=set(PARAMS)|{'measurement_basis'}:raise DomainError('基础长宽高及范围说明须完整并逐项关联原件，不得另填根数或扣减')
         text(d['measurement_basis'],'逐项基础适用范围说明');by_index[i]=d
     dimensions=dict(r['dimensions']);refs=dict(r['source_evidence']);conversions=list(r['unit_conversions'])
@@ -68,8 +69,9 @@ def calculate(comp,source=None):
     for i,d in sorted(by_index.items()):
         v=available[i];key='foundation.'+str(i);params={};asts={}
         tiers=None
-        if 'shape' in d:
-            from . import foundation_steps
+        if d.get('shape') in foundation_round.SHAPES:
+            single,shape_ast,tiers,params=foundation_round.calculate(d,key,dimensions,refs,conversions)
+        elif 'shape' in d:
             single,shape_ast,tiers=foundation_steps.calculate(d,key,dimensions,refs,conversions)
         else:
             for k in PARAMS:
@@ -84,8 +86,9 @@ def calculate(comp,source=None):
             for tier in tiers:
                 tier['total_volume']=str(Decimal(tier['single_level_volume'])*n*count);tier['formula_asts']['total_volume']=op('multiply',tier['formula_asts']['single_level_volume'],v['post_layout']['formula_ast'],{'dimension':'multiplicity'})
     stepped_table=any('foundation_levels' in row for row in rows)
+    round_table=any(row.get('shape') in foundation_round.SHAPES for row in rows)
     gross=quantity_number(total*count);quantity=quantity_number(gross.quantize(Decimal(1).scaleb(-digits),rounding=ROUND_HALF_UP))
-    return dict(quantity=str(quantity),gross=str(gross),deduction='0',unit='m³',parameters={},formula=('Σ[单基础逐层长×宽×层高之和×来源最终单组立柱根数] × ' if stepped_table else 'Σ[基础长×宽×高×来源最终单组立柱根数] × ')+str(count)+'；仅总体积修约'+str(digits)+'位',formula_ast={'op':'round','args':[op('multiply',op('add',*nodes),{'dimension':'multiplicity'})],'digits':digits,'mode':'HALF_UP'},dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,source_geometry=snapshot(s),source_component_id=s['id'],source_component_hash=comp['source_component_hash'],material=comp['material'],foundation_items=rows,foundation_summary=dict(source_name=s['name'],source_revision=s['revision'],selected_item_count=len(rows),unselected_post_item_count=len(available)-len(rows),single_group_count=group_posts,multiplicity=str(count),total_count=str(Decimal(group_posts)*count),single_group_volume=str(total),unrounded_quantity=str(gross),rounding_digits=digits,rounding_adjustment=str(quantity-gross)),rounding_rule='Decimal 80位；基础尺寸换算、单基础及分项体积不修约，累计乘来源重复一次后，仅总体积按HALF_UP修约；数量直接引用已审立柱布置公式',rule_version=foundation_steps.VERSION if stepped_table else VERSION,notice=foundation_steps.NOTICE if stepped_table else NOTICE)
+    return dict(quantity=str(quantity),gross=str(gross),deduction='0',unit='m³',parameters={},formula=('Σ[单基础实体体积（圆柱π/4×实际直径²×净高，台阶逐层相加）×来源最终单组立柱根数] × ' if round_table else 'Σ[单基础逐层长×宽×层高之和×来源最终单组立柱根数] × ' if stepped_table else 'Σ[基础长×宽×高×来源最终单组立柱根数] × ')+str(count)+'；仅总体积修约'+str(digits)+'位',formula_ast={'op':'round','args':[op('multiply',op('add',*nodes),{'dimension':'multiplicity'})],'digits':digits,'mode':'HALF_UP'},dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,source_geometry=snapshot(s),source_component_id=s['id'],source_component_hash=comp['source_component_hash'],material=comp['material'],foundation_items=rows,foundation_summary=dict(source_name=s['name'],source_revision=s['revision'],selected_item_count=len(rows),unselected_post_item_count=len(available)-len(rows),single_group_count=group_posts,multiplicity=str(count),total_count=str(Decimal(group_posts)*count),single_group_volume=str(total),unrounded_quantity=str(gross),rounding_digits=digits,rounding_adjustment=str(quantity-gross)),rounding_rule='Decimal 80位；基础尺寸换算、单基础及分项体积不修约，累计乘来源重复一次后，仅总体积按HALF_UP修约；数量直接引用已审立柱布置公式',rule_version=foundation_round.VERSION if round_table else foundation_steps.VERSION if stepped_table else VERSION,notice=foundation_round.NOTICE if round_table else foundation_steps.NOTICE if stepped_table else NOTICE,**({'foundation_pi_constant':foundation_round.PI} if round_table else {}))
 
 
 def validate(p,comp,saved=False):

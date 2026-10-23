@@ -15,7 +15,7 @@ TYPES.update({
     'planar_regions': {'label': '平面区域并集与扣减', 'profiles': [profile('area', '平面净面积', 'm²'), profile('volume', '等厚平面净实体体积', 'm³')]},
     'polygon_region': {'label': '水平设计多边形与扣孔', 'profiles': [profile('area', '多边形扣孔后净面积', 'm²'), profile('volume', '多边形等厚净实体体积', 'm³')]},
     'spatial_regions': {'label': '空间长方体并集与扣减', 'profiles': [profile('volume', '空间净实体体积', 'm³')]},
-    'post_foundation': {'label':'栏杆立柱独立基础','profiles':[profile('volume','立柱独立基础实体体积（矩形/同心台阶）','m³')]},
+    'post_foundation': {'label':'栏杆立柱独立基础','profiles':[profile('volume','立柱独立基础实体体积（矩形/圆柱/同心台阶）','m³')]},
     'railing_material': {'label':'栏杆材料表','profiles':[profile('mass','栏杆材料表质量','kg')]},
     'polygon_railing': {'label': '设计边线栏杆', 'profiles': [profile('length', '核定原边水平范围栏杆长度', 'm'), profile('spatial_length', '设计坐标线三维栏杆长度', 'm'), profile('horizontal_projection', '设计坐标线水平投影栏杆长度', 'm')]},
     'surface_faces': {'label': '已审实体逐面计量', 'profiles': [profile('formwork', '模板接触面', 'm²'), profile('waterproof', '防水展开面', 'm²')]},

@@ -194,7 +194,7 @@ def test_roles_tenant_foreign_source_evidence_and_mapping_profile(clients):
  e,r,pid,s,b,eid=setup(clients);url=f'/api/v1/projects/{pid}/post-foundation-candidates';assert r.get(url,params=dict(component_id=s['id'])).status_code==200;assert clients['other'].get(url,params=dict(component_id=s['id'])).status_code==404;post(r,pid,b,expected=403)
  other=create(e)['id'];upload(e,other,'异项目');foreign=get(e,other)['evidence'][-1]['id'];bad=copy.deepcopy(b);bad['foundation_items'][0]['evidence']['height']=foreign;post(e,pid,bad,expected=404);bad=copy.deepcopy(b);bad['material_evidence_id']=foreign;post(e,pid,bad,expected=404)
  from backend.mapping_types import component_profile
- assert component_profile(b,calculate(b,s))==dict(id='volume',label='立柱独立矩形基础实体体积',unit='m³')
+ assert component_profile(b,calculate(b,s))==dict(id='volume',label='立柱独立基础实体体积（矩形/圆柱/同心台阶）',unit='m³')
 
 
 def test_unapproved_and_non_post_sources_rejected(clients):
