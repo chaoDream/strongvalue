@@ -47,7 +47,7 @@ def design_project(clients, kind='chamber_plate', profile='cover'):
         import importlib
         module = importlib.import_module('tests.test_'+{'surface_faces': 'surface_takeoff', 'station_trench': 'trench_takeoff',
              'volume_balance': 'volume_balance', 'pipe_envelope': 'pipe_envelope', 'route_bedding': 'bedding_takeoff',
-             'circular_chamber': 'chamber_takeoff', 'chamber_plate': 'plate_openings', 'polygon_railing': 'railing_takeoff'}[kind])
+             'circular_chamber': 'chamber_takeoff', 'chamber_plate': 'plate_openings', 'polygon_railing': 'railing_takeoff', 'railing_material':'railing_material'}[kind])
         if kind=='polygon_railing' and profile!='length':
             from tests.test_route_railing import setup as route_railing_setup
             values=route_railing_setup(clients,basis='spatial' if profile=='spatial_length' else 'horizontal')
@@ -90,7 +90,7 @@ def test_catalog_keeps_primitive_forms_separate_and_covers_all_kinds(clients):
     types = e.get('/api/v1/boq-mapping-types').json()
     assert set(types) == set(GEOMETRIES) | set(STRUCTURED_KINDS)
     assert e.get('/api/v1/takeoff-types').json() == GEOMETRIES
-    assert sum(len(v['profiles']) for v in types.values()) == 32
+    assert sum(len(v['profiles']) for v in types.values()) == 33
     for kind, v in types.items():
         for p in v['profiles']: assert selected_profile({'kind': kind, 'measurement_profile': p['id'], 'unit': p['unit']}) == p
 

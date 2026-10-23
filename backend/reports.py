@@ -230,7 +230,7 @@ def tables(p, q, approved):
                         c['canonical_value']+' '+c['canonical_unit'], c['rule_version'], part['evidence'][c['parameter']]]
                        for t in snapshot['takeoffs'] for part in t.get('measurement_parts', []) for c in part.get('unit_conversions', [])]
     conversion_rows.extend([[t['name'],c['parameter'],c['original_value'],c['source_unit'],c['factor'],c['canonical_value']+' '+c['canonical_unit'],c['rule_version'],t['evidence'][c['parameter']]]
-                           for t in snapshot['takeoffs'] if t.get('railing_summary') or t.get('polygon_summary') or t.get('planar_summary') or t.get('spatial_summary') or t.get('surface_summary') or t.get('route_summary') or t.get('trench_summary') or t.get('pipe_summary') or t.get('bedding_summary') or t.get('chamber_summary') or t.get('plate_summary') for c in t['unit_conversions']])
+                           for t in snapshot['takeoffs'] if t.get('material_summary') or t.get('railing_summary') or t.get('polygon_summary') or t.get('planar_summary') or t.get('spatial_summary') or t.get('surface_summary') or t.get('route_summary') or t.get('trench_summary') or t.get('pipe_summary') or t.get('bedding_summary') or t.get('chamber_summary') or t.get('plate_summary') for c in t['unit_conversions']])
     if conversion_rows:
         result.append(('算量原始单位换算', ['构件','分项 / 参数','原始值','原始单位','换算倍数','标准值 / 单位','单位规则版本','原始证据'], conversion_rows))
     plates = [t for t in snapshot['takeoffs'] if t.get('plate_summary')]
@@ -386,6 +386,23 @@ def tables(p, q, approved):
                          for t in spatial for i in t['spatial_intersections']]
         if intersections:
             result.append(('空间相交定位', ['构件', '加扣', '长方体A', '长方体B', '两两相交体积（m³）', '说明'], intersections))
+    def material_proofs(item):
+        labels={'quantity':'每组数量','unit_weight':'每米质量','cut_length':'下料长度','measurement_basis':'说明'}
+        grouped={}
+        for key,eid in item['evidence'].items():grouped.setdefault(eid,[]).append(labels[key])
+        return '\n'.join('、'.join(names)+'：'+eid for eid,names in grouped.items())
+    materials=[t for t in snapshot['takeoffs'] if t.get('material_summary')]
+    if materials:
+        labels={'source_single_length':'来源单组未修约计入长度（m）','single_group_mass':'单组材料质量（kg）','multiplicity':'来源重复数量','unrounded_quantity':'未修约总质量（kg）','rounding_digits':'总质量修约位数','rounding_adjustment':'总质量修约差额（kg）'}
+        result.append(('栏杆材料质量汇总',['材料表','字段','内容'],
+                       [[t['name'],label,str(t['material_summary'][key])] for t in materials for key,label in labels.items()]+
+                       [[t['name'],key,value] for t in materials for key,value in [('来源',t['material_summary']['source_name']+' / V'+str(t['material_summary']['source_revision'])),('材料类别',t['material']),('计长口径',t['material_summary']['source_length_basis']),('工程量',t['quantity']+' kg'),('计量依据',t['measurement_basis']),('算法及精度',t['rule_version']+'；'+t['rounding_rule']),('适用边界',t['notice'])]]))
+        result.append(('栏杆材料逐项计算',['材料表 / 项目','类型 / 每组数量','单道或单件长度（m）','每米质量（kg/m）','单组线材总长（m）','单组质量（kg）','说明及依据'],
+                       [[t['name']+' / '+v['name'],('连续道数' if v['mode']=='continuous' else '定长件数')+' / '+v['normalized_quantity'],v['single_member_length'],v['normalized_unit_weight'],v['single_group_stock_length'],v['single_group_mass'],v['measurement_basis']+'；'+material_proofs(v)] for t in materials for v in t['material_items']]))
+        result.append(('栏杆材料原始参数',['材料表 / 项目','每组道数或件数','每米质量原值及单位','单件下料原值及单位','逐参数依据'],
+                       [[t['name']+' / '+v['name'],str(v['quantity']),str(v['unit_weight'])+' '+v['weight_unit'],str(v['cut_length'])+' '+v['length_unit'] if v['mode']=='cut_pieces' else '采用来源单组未修约计入长度',material_proofs(v)] for t in materials for v in t['material_items']]))
+        result.append(('栏杆材料计长来源',['材料表 / 来源原段','原边或原段 / 决定','来源计入长（m）','局部区间（m）','范围说明及依据'],
+                       [[t['name']+' / '+('S'+str(e['edge_index']) if e['role']=='route' else 'R'+str(e['ring_index'])+' E'+str(e['edge_index'])),('设计线段' if e['role']=='route' else '外轮廓' if e['role']=='outer' else '孔')+' / '+{'exclude':'排除','full':'整段','ranges':'局部区间'}[e['mode']],e['selected_length'],'；'.join(v['s_from']+'→'+v['s_to'] for v in e['normalized_ranges']) if e['mode']=='ranges' else '整段' if e['mode']=='full' else '无计入',e['basis']+'；'+e['evidence_id']] for t in materials for e in t['source_railing']['railing_edges']]))
     def railing_edge_label(e):
         return 'S'+str(e['edge_index']) if e['role']=='route' else 'R'+str(e['ring_index'])+' E'+str(e['edge_index'])
     railings = [t for t in snapshot['takeoffs'] if t.get('railing_summary')]
