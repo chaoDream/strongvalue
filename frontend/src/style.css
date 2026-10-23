@@ -2781,3 +2781,10 @@ input::placeholder,textarea::placeholder {
 .dxf-route-panel table { table-layout:fixed; white-space:normal; }
 .dxf-route-panel td { overflow-wrap:anywhere; }
 .dxf-route-panel > .field { margin:16px 20px; }
+
+.dxf-assembly-selection { margin:16px 20px; padding:16px; border:1px solid #dce7df; border-radius:8px; background:#fafcf9; }
+.dxf-assembly-selection li { padding:10px 0; overflow-wrap:anywhere; border-bottom:1px solid #e6ece7; }
+.dxf-assembly-selection .check-option { margin:0; }
+.dxf-assembly-sources { overflow-wrap:anywhere; margin:14px 0; }
+.dxf-assembly-sources table { table-layout:fixed; white-space:normal; }
+.dxf-assembly-sources td { overflow-wrap:anywhere; }

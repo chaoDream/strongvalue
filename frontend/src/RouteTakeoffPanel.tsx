@@ -1,4 +1,5 @@
 import React, {useState} from 'react';
+import DXFAssemblySources from './DXFAssemblySources';
 import {Plus, X, Trash2, ArrowUp, ArrowDown} from 'lucide-react';
 
 type Obj = Record<string, any>;
@@ -25,7 +26,7 @@ export function RouteDiagram({result}:{result:Obj}) {
 export function RouteDetails({item,sourceLink}:{item:Obj;sourceLink?:(id:string)=>React.ReactNode}) {
   const r=item.preview||item, s=r.route_summary;
   if(!s)return null;
-  return <>{item.dxf_trace&&<details open><summary>DXF原对象与单位校核</summary><p>{item.dxf_trace.candidate.kind} / 句柄 {item.dxf_trace.candidate.handle} / 图层 {item.dxf_trace.candidate.layer} / 声明单位 {item.dxf_trace.candidate.unit}</p><p>P{item.dxf_trace.calibration.from_point}—P{item.dxf_trace.calibration.to_point}：已知 {item.dxf_trace.calibration.known_distance_m}m / CAD {item.dxf_trace.calibration.cad_distance_m}m；容差 {item.dxf_trace.calibration.tolerance_m}m，偏差 {item.dxf_trace.calibration.delta_m}m</p><p>{item.dxf_trace.reason} · {item.dxf_trace.author}</p>{sourceLink&&<p>独立校核依据：{sourceLink(item.dxf_trace.proofs.calibration.evidence_id)}</p>}</details>}<div className="notice neutral"><div><b>设计管线长度 {r.quantity} m</b><p>{s.point_count}个转折点 / {s.segment_count}段；重复数量{s.multiplicity}。仅总量四舍五入至{s.rounding_digits}位小数。</p></div></div>
+  return <>{item.dxf_trace&&<DXFAssemblySources candidate={item.dxf_trace.candidate}/>} {item.dxf_trace&&<details open><summary>DXF原对象与单位校核</summary><p>{item.dxf_trace.candidate.kind} / 句柄 {item.dxf_trace.candidate.handle} / 图层 {item.dxf_trace.candidate.layer} / 声明单位 {item.dxf_trace.candidate.unit}</p><p>P{item.dxf_trace.calibration.from_point}—P{item.dxf_trace.calibration.to_point}：已知 {item.dxf_trace.calibration.known_distance_m}m / CAD {item.dxf_trace.calibration.cad_distance_m}m；容差 {item.dxf_trace.calibration.tolerance_m}m，偏差 {item.dxf_trace.calibration.delta_m}m</p><p>{item.dxf_trace.reason} · {item.dxf_trace.author}</p>{sourceLink&&<p>独立校核依据：{sourceLink(item.dxf_trace.proofs.calibration.evidence_id)}</p>}</details>}<div className="notice neutral"><div><b>设计管线长度 {r.quantity} m</b><p>{s.point_count}个转折点 / {s.segment_count}段；重复数量{s.multiplicity}。仅总量四舍五入至{s.rounding_digits}位小数。</p></div></div>
     <p>{r.coordinate_basis}</p><RouteDiagram result={r}/>
     <details open><summary>逐段三维长度</summary><div className="table-wrap"><table><thead><tr>{['管段','起点 → 终点','ΔXYZ（m）','三维段长（m）','水平投影长（m）'].map(x=><th key={x}>{x}</th>)}</tr></thead><tbody>
       {r.route_segments.map((v:Obj)=><tr key={v.index}><td>S{v.index}</td><td>P{v.from_index} {v.from_name} → P{v.to_index} {v.to_name}</td><td>{axes.map(k=><small className="block" key={k}>Δ{k.toUpperCase()}：{v.delta[k]}</small>)}</td><td style={{maxWidth:220,overflowWrap:'anywhere'}}>{v.length}</td><td style={{maxWidth:200,overflowWrap:'anywhere'}}>{v.horizontal_length}</td></tr>)}

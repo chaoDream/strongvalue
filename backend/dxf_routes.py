@@ -5,10 +5,11 @@ from typing import Annotated, Literal
 from fastapi import APIRouter,Depends,HTTPException,Query
 from pydantic import BaseModel,ConfigDict,Field,StringConstraints
 from . import main as core,store
-from .engine import precise,number
+from .engine import precise
 from .dxf_geometry import parse,route_body,VERSION
 from .planar_takeoff import linear
 from .task_execution import original_bytes
+from .dxf_assembly import SourcePart,AssemblyIn,assemble,rebuild,source_ids
 
 router=APIRouter(prefix='/api/v1')
 Text=Annotated[str,StringConstraints(strict=True,strip_whitespace=True,min_length=1,max_length=2000)]
@@ -41,10 +42,16 @@ class PreviewIn(BaseModel):
     source_confirmed:Annotated[bool,Field(strict=True)]
     component_id:Text|None=None
     component_hash:Hash|None=None
+    segments:list[SourcePart]|None=Field(default=None,min_length=2,max_length=20)
 
 
 class AdoptIn(PreviewIn):
     preview_hash:Hash
+
+
+def request_payload(body):
+    # Preserve pre-assembly request hashes for retries of v0.49 operations.
+    return body.model_dump(exclude={'segments'} if body.segments is None else set())
 
 
 def document(p,did):
@@ -86,8 +93,9 @@ def calibration(row,body):
 
 
 def evaluate(p,did,cid,body):
-    doc,data,items=rows(p,did);row=next((r for r in items if r['id']==cid),None)
-    if not row or store.digest(row)!=body['object_hash']:raise HTTPException(409,'DXF候选、任务或原件已变化，请重新读取')
+    doc,data,items=rows(p,did)
+    row=assemble(items,body['segments']) if body.get('segments') is not None else next((r for r in items if r['id']==cid),None)
+    if not row or row['id']!=cid or store.digest(row)!=body['object_hash']:raise HTTPException(409,'DXF候选、任务或原件已变化，请重新读取')
     if not row['eligible']:raise HTTPException(422,row['issue'])
     proof={k:evidence_proof(p,body[k+'_evidence_id']) for k in ('basis','calibration')}
     calibration_source=core.require_evidence(p,body['calibration_evidence_id'])
@@ -113,10 +121,19 @@ def read(pid:str,did:str,layer:str=Query('',max_length=2000),offset:int=Query(0,
                 'total':len(items),'offset':offset,'limit':limit,'candidates':[{**r,'object_hash':store.digest(r)} for r in items[offset:offset+limit]]}
 
 
+@router.post('/projects/{pid}/documents/{did}/dxf-route-assembly')
+def assembly(pid:str,did:str,body:AssemblyIn,a=Depends(core.actor)):
+    with store.connect() as conn:
+        p=core.project(conn,pid,a);doc,data,items=rows(p,did)
+        row=assemble(items,body.model_dump()['segments'])
+        return {'candidate':{**row,'object_hash':store.digest(row)},'document_name':doc['name'],
+                'notice':'按明确顺序与方向组成候选；仅合并XYZ精确相同的连接端点，不自动吸附、补段或增加工程量。'}
+
+
 @router.post('/projects/{pid}/documents/{did}/dxf-route-candidates/{cid}/preview')
 def preview(pid:str,did:str,cid:str,body:PreviewIn,a=Depends(core.actor)):
     with store.connect() as conn:
-        result=evaluate(core.project(conn,pid,a),did,cid,body.model_dump())
+        result=evaluate(core.project(conn,pid,a),did,cid,request_payload(body))
         return {**result,'preview_hash':store.digest(result)}
 
 
@@ -124,7 +141,7 @@ def preview(pid:str,did:str,cid:str,body:PreviewIn,a=Depends(core.actor)):
 def adopt(pid:str,did:str,cid:str,body:AdoptIn,a=Depends(core.actor)):
     core.edit(a)
     if body.source_confirmed is not True:raise HTTPException(422,'须明确确认原CAD对象为设计中心线，单位、WCS及高程基准已核对')
-    payload=body.model_dump();request_hash=store.digest({'document_id':did,'candidate_id':cid,**payload})
+    payload=request_payload(body);request_hash=store.digest({'document_id':did,'candidate_id':cid,**payload})
     with store.transaction() as conn:
         p=core.project(conn,pid,a)
         duplicate=next((r for r in p['dxf_route_adoptions'] if r['request_id']==body.request_id),None)
@@ -135,7 +152,7 @@ def adopt(pid:str,did:str,cid:str,body:AdoptIn,a=Depends(core.actor)):
         if store.digest(result)!=body.preview_hash:raise HTTPException(409,'DXF校核预览或依据已变化，请重新预览')
         if not result['calibration']['passed']:raise HTTPException(409,'CAD两点距离与已知长度不符，禁止采用或自动缩放')
         row=result['candidate'];old=core.find(p,'components',body.component_id) if body.component_id else None
-        if any(c.get('dxf_trace',{}).get('candidate',{}).get('id')==cid and c['id']!=body.component_id for c in p['components']):
+        if any(source_ids(c['dxf_trace']['candidate']) & source_ids(row) and c['id']!=body.component_id for c in p['components'] if c.get('dxf_trace')):
             raise HTTPException(409,'此CAD对象已有管线登记，请选择原管线修订，不能重复计长')
         eid=store.uid();trace={'version':VERSION,'candidate':row,'scope':{k:payload[k] for k in SCOPE},'calibration':result['calibration'],'calibration_input':body.calibration.model_dump(),
                               'proofs':result['proofs'],'source_confirmed':True,'reason':body.reason,'author':a['username'],'created_at':store.now(),'evidence_id':eid}
@@ -172,7 +189,7 @@ def validate_geometry_evidence(p,e):
     candidate=e.get('dxf_geometry')
     if not isinstance(candidate,dict):raise HTTPException(409,'DXF坐标证据缺少原对象来源')
     doc,data,items=rows(p,e.get('document_id'))
-    row=next((r for r in items if r['id']==candidate.get('id')),None)
+    row=rebuild(items,candidate)
     if (not row or row!=candidate or e.get('document_hash')!=row['document_hash'] or e.get('method')!='dxf_geometry'
         or e.get('page') is not None or e.get('bbox') is not None or e.get('text')!=evidence_text(row)):
         raise HTTPException(409,'DXF坐标证据或原件、任务、原对象关联已变化')
@@ -203,7 +220,7 @@ def _validate_trace(p,comp):
     Calibration.model_validate(trace['calibration_input'])
     did=candidate.get('document_id')
     doc,data,items=rows(p,did)
-    row=next((r for r in items if r['id']==candidate.get('id')),None)
+    row=rebuild(items,candidate)
     if not row or row!=candidate or not row['eligible']:raise HTTPException(409,'DXF原对象、任务或原件已变化，请重新校核采用')
     if calibration(row,trace['calibration_input'])!=trace['calibration'] or not trace['calibration']['passed']:
         raise HTTPException(409,'DXF单位校核记录无效')

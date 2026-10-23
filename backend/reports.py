@@ -1,6 +1,6 @@
 """Application report exporter. All tables use the same immutable quote snapshot."""
 import io
-from .store import digest
+from .store import digest,canonical
 import json
 import os
 from pathlib import Path
@@ -142,6 +142,13 @@ def tables(p, q, approved):
               'P'+str(t['calibration']['from_point'])+'–P'+str(t['calibration']['to_point'])+'：'+t['calibration']['known_distance_m']+'m / '+t['calibration']['cad_distance_m']+'m',
               t['calibration']['tolerance_m']+'m / '+t['calibration']['delta_m']+'m',t['reason']+' / 校核证据 '+t['proofs']['calibration']['evidence_id'],
               t['author']+' / '+t['created_at']] for x in dxf_routes for t in [x['trace']]]))
+    assembled=[(x,x['trace']['candidate']) for x in dxf_routes if x['trace']['candidate'].get('kind')=='ASSEMBLY']
+    if assembled:
+        result.append(('DXF多对象组装来源',['管线 / 修订','顺序 / 方向','原对象 / 图层','组装点范围','原始起点 → 终点','原单位 / 文件哈希'],
+            [[x.get('component_name',x['component_id'])+' / V'+str(x['component_revision']),str(i+1)+' / '+('反向' if part['reverse'] else '原方向'),
+              src['kind']+' '+src['handle']+' / '+src['layer'],'P'+str(part['start_point'])+'—P'+str(part['end_point']),
+              canonical(src['points'][0])+' → '+canonical(src['points'][-1]),src['unit']+' / '+src['document_hash']]
+             for x,row in assembled for i,(src,part) in enumerate(zip(row['source_objects'],row['source_ranges']))]))
     offers=snapshot.get('supplier_quotes',[])
     if offers:
         result.append(('供应商报价登记',['资源 / 清单','供应商 / 报价单','单价 / 税制 / 地区','期次 / 有效期','供货条件 / 登记依据','状态 / 原始证据'],
