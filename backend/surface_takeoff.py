@@ -18,6 +18,8 @@ SNAPSHOT_FIELDS = ['id', 'revision', 'name', 'kind', 'parameters', 'quantity_typ
 
 
 def snapshot(source):
+    if source['kind'] == 'polygon_region':
+        return {k:v for k,v in source.items() if k != 'state'}
     return {k: source[k] for k in SNAPSHOT_FIELDS}
 
 
@@ -28,6 +30,9 @@ def canonical(value):
 @precise
 def boundary(source):
     """Coordinate compression; cells are exact intervals, never sampled pixels."""
+    if source['kind'] == 'polygon_region':
+        from .polygon_surface import boundary as polygon_boundary
+        return polygon_boundary(source)
     result = solid_quantity(source)
     positions = {axis: {} for axis in 'xyz'}
     for i, r in enumerate(result['spatial_regions']):
@@ -83,17 +88,30 @@ def boundary(source):
 def source_component(p, cid):
     from .main import find
     source = find(p, 'components', cid)
-    if source['kind'] != 'spatial_regions' or source['state'] != 'approved':
-        raise HTTPException(409, '表面算量须选择当前已审定的空间长方体构件')
-    validate_solid(p, source, saved=True)
+    if source['kind'] not in ('spatial_regions','polygon_region') or source['state'] != 'approved':
+        raise HTTPException(409, '表面算量须选择当前已审定的空间长方体或多边形等厚体积构件')
+    if source['kind'] == 'polygon_region':
+        from .polygon_takeoff import validate as validate_polygon
+        validate_polygon(p, source, saved=True)
+        if source.get('quantity_type') != 'volume':
+            raise HTTPException(409, '多边形面积模式不能作为实体表面来源，请选择等厚体积构件')
+    else:
+        validate_solid(p, source, saved=True)
     return source
+
+
+def source_notice(source):
+    if source['kind'] == 'polygon_region':
+        from .polygon_surface import NOTICE as polygon_notice
+        return polygon_notice
+    return NOTICE
 
 
 def candidates(p, cid):
     source = source_component(p, cid)
     result = boundary(source)
     return {**result, 'base_faces': result['faces'], 'source_component_id': source['id'], 'source_component_hash': store.digest(snapshot(source)),
-            'source_name': source['name'], 'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': NOTICE}
+            'source_name': source['name'], 'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': source_notice(source)}
 
 
 @precise
@@ -103,6 +121,8 @@ def partition(source, subdivisions):
         raise DomainError('分区配置须为列表，最多1000个原始分面')
     if not subdivisions:
         return result
+    if source['kind'] == 'polygon_region':
+        raise DomainError('多边形实体暂不支持局部分区；不得将净面或斜边侧面当作轴向矩形切分')
     originals = {f['face_id']: f for f in result['faces']}
     by_id, records, faces = {}, [], []
     for i, group in enumerate(subdivisions):
@@ -176,7 +196,7 @@ def partition_candidates(p, body):
     check_sources(p, result['source_evidence'])
     return {**result, 'base_faces': boundary(source)['faces'], 'source_component_id': source['id'],
             'source_component_hash': body['source_component_hash'], 'source_name': source['name'],
-            'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': NOTICE}
+            'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': source_notice(source)}
 
 
 @precise
@@ -227,6 +247,9 @@ def calculate(comp, source=None):
             'rule_version': VERSION, 'rounding_rule': 'Decimal 80位计算精度；表面积不另行修约', 'notice': NOTICE}
     if result.get('surface_subdivisions'):
         output.update(surface_subdivisions=result['surface_subdivisions'], rule_version='solid-boundary-1.1')
+    if source['kind'] == 'polygon_region':
+        from .polygon_surface import VERSION as polygon_version, ROUNDING as polygon_rounding
+        output.update(rule_version=polygon_version, rounding_rule=polygon_rounding, notice=source_notice(source))
     return output
 
 

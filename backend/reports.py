@@ -393,12 +393,26 @@ def tables(p, q, approved):
                          t['surface_summary']['total_area']+' m²', t['surface_summary']['included_area']+' / '+t['surface_summary']['excluded_area']+' m²',
                          t['surface_summary']['multiplicity']+' / '+t['quantity']+' m²', t['measurement_basis'], t['source_component_hash']] for t in surfaces]))
         result.append(('逐面计量决定', ['构件 / 面', '朝向 / 平面位置（m）', '面内坐标范围（m）', '单组面积（m²）', '计量决定', '计量说明', '原始依据'],
-                       [[t['name']+' / F'+str(f['index'])+(' / 原F'+str(f['parent_index'])+' 子'+str(f['sub_index']) if f.get('parent_index') else ''), f['normal']+' / '+f['plane'],
-                         f['u_axis']+': '+f['u_from']+' → '+f['u_to']+'; '+f['v_axis']+': '+f['v_from']+' → '+f['v_to'],
+                       [[t['name']+' / F'+str(f['index'])+(' / 原F'+str(f['parent_index'])+' 子'+str(f['sub_index']) if f.get('parent_index') else ''), f['label'] if f.get('geometry_type') else f['normal']+' / '+f['plane'],
+                         f['position']+'；'+f['calculation'] if f.get('geometry_type') else f['u_axis']+': '+f['u_from']+' → '+f['u_to']+'; '+f['v_axis']+': '+f['v_from']+' → '+f['v_to'],
                          f['area'], '计入' if f['included'] else '排除', f['basis'], f['evidence_id']] for t in surfaces for f in t['surface_faces']]))
-        result.append(('表面几何来源', ['表面构件 / 来源长方体', '加扣 / 参数', '原始值', '原始单位', '原始依据'],
+        result.append(('表面几何来源', ['表面构件 / 来源实体', '类别 / 参数', '原始值', '原始单位', '原始依据'],
                        [[t['name']+' / '+r['name'], ('加项' if r['operation']=='add' else '扣减')+' / '+key, str(value), r['unit'], r['evidence'][key]]
-                        for t in surfaces for r in t['source_geometry']['regions'] for key, value in r['parameters'].items()]))
+                        for t in surfaces for r in t['source_geometry'].get('regions', []) for key, value in r['parameters'].items()]+
+                       [[t['name']+' / '+t['source_geometry']['name'], '等厚多边形 / '+label, str(t['source_geometry'][key]), unit, t['source_geometry'][proof]]
+                        for t in surfaces if t['source_geometry']['kind']=='polygon_region'
+                        for key,label,unit,proof in [('thickness','竖向厚度',t['source_geometry']['thickness_unit'],'thickness_evidence_id'),('multiplicity','重复数量','组','multiplicity_evidence_id')]]))
+        polygon_surfaces = [t for t in surfaces if t['source_geometry']['kind']=='polygon_region']
+        if polygon_surfaces:
+            result.append(('多边形表面原始坐标', ['表面构件 / 来源轮廓', '原顶点', '原始XY / 单位', '逐坐标原始依据'],
+                           [[t['name']+' / R'+str(ri)+' '+r['name'], 'P'+str(pi)+' '+pt['name'],
+                             'X='+str(pt['parameters']['x'])+'；Y='+str(pt['parameters']['y'])+' / '+pt['unit'],
+                             'X：'+pt['evidence']['x']+'；Y：'+pt['evidence']['y']]
+                            for t in polygon_surfaces for ri,r in enumerate(t['source_geometry']['polygon_rings'],1) for pi,pt in enumerate(r['points'],1)]))
+            result.append(('多边形表面来源口径', ['表面构件', '来源厚度 / 原始依据', '来源数量 / 原始依据', '坐标与计量口径'],
+                           [[t['name'], str(t['source_geometry']['thickness'])+' '+t['source_geometry']['thickness_unit']+' / '+t['source_geometry']['thickness_evidence_id'],
+                             str(t['source_geometry']['multiplicity'])+' / '+t['source_geometry']['multiplicity_evidence_id'],
+                             t['source_geometry']['coordinate_basis']+'；'+t['source_geometry']['measurement_basis']] for t in polygon_surfaces]))
         result.append(('表面计量规则', ['构件', '边界规则版本', '精度', '适用范围'],
                        [[t['name'], t['rule_version'], t['rounding_rule'], t['notice']] for t in surfaces]))
     cuts = [[t['name'], '原F'+str(c['parent_index']), c['coordinate_axis'], c['original_value']+' '+c['source_unit'],
