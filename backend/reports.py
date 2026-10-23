@@ -422,7 +422,7 @@ def tables(p, q, approved):
         result.append(('异形板网片孔边界校验',['材料表 / 板片','轮廓或孔A / 孔B','关系','结论'],
                        [[t['name']+' / '+v['name'],c['left']+' / '+c['right'],'严格在内且不接触外边界' if c['relation']=='strictly_inside' else '孔间分离，无接触、重叠或包含','通过'] for t,v in polygon_panels for c in v['panel_geometry']['polygon_checks']]+
                        [[t['name']+' / '+v['name'],'无孔','明确仅外轮廓','简单外轮廓通过'] for t,v in polygon_panels if not v['panel_geometry']['polygon_checks']]))
-    posts=[(t,v) for t in materials for v in t['material_items'] if v['mode']=='spaced_posts']
+    posts=[(t,v) for t in materials for v in t['material_items'] if v['mode'] in ('spaced_posts','spaced_added_posts')]
     if posts:
         result.append(('立柱均分布置质量',['材料表 / 材料项','来源S口径','单组根数','每根下料长（m）','每米质量（kg/m）','单组总长 / 质量','原始下料长及每米质量','规则与依据'],
                        [[t['name']+' / '+v['name'],t['material_summary']['source_length_basis'],v['normalized_quantity'],v['single_member_length'],v['normalized_unit_weight'],v['single_group_stock_length']+' m / '+v['single_group_mass']+' kg',str(v['cut_length'])+' '+v['length_unit']+' / '+str(v['unit_weight'])+' '+v['weight_unit'],v['measurement_basis']+'；'+material_proofs(v)+'；'+v['post_layout']['notice']] for t,v in posts]))
@@ -432,7 +432,7 @@ def tables(p, q, approved):
         result.append(('立柱跨间数精确校验',['材料表 / 材料项 / 区间','最小正整数N','下界(N−1)²×间距²','未修约区间长度²','上界N²×间距²','严格关系及规则'],
                        [[t['name']+' / '+v['name']+' / '+r['label'],str(r['interval_count']),fraction_text(r['ceil_certificate']['lower_spacing_square']),fraction_text(r['ceil_certificate']['range_length_square']),fraction_text(r['ceil_certificate']['upper_spacing_square']),'下界 < 区间长度² ≤ 上界；'+v['post_layout']['rule_version']] for t,v in posts for r in v['post_layout']['post_ranges']]))
         result.append(('立柱逐根端距',['材料表 / 材料项','立柱编号','来源原段区间','均分节点号','原段起点端距S（m）','位置'],
-                       [[t['name']+' / '+v['name'],str(r['index']),r['range_label'],str(r['bay_index']),r['s'],{'start':'区间起端','end':'区间终端','interior':'内部均分柱'}[r['position_kind']]] for t,v in posts for r in v['post_layout']['post_stations']]))
+                       [[t['name']+' / '+v['name'],str(r['index']),r['range_label'],str(r.get('bay_index','-')),r['s'],('构造加柱：'+r['additional_label']) if r['position_kind']=='additional' else {'start':'区间起端','end':'区间终端','interior':'内部均分柱'}[r['position_kind']]] for t,v in posts for r in v['post_layout']['post_stations']]))
     fixed_posts=[(t,v) for t in materials for v in t['material_items'] if v['mode'] in ('fixed_posts','fixed_added_posts')]
     if fixed_posts:
         fixed_directions={'from_start':'从区间起端向终端','from_end':'从区间终端向起端'}
@@ -445,10 +445,10 @@ def tables(p, q, approved):
                        [[t['name']+' / '+v['name']+' / '+r['label'],str(r['interval_count'])+' / '+str(r['regular_interval_count']),fixed_fraction(r['ceil_certificate']['lower_spacing_square']),fixed_fraction(r['ceil_certificate']['range_length_square']),fixed_fraction(r['ceil_certificate']['upper_spacing_square']),'下界 < 区间长度² ≤ 上界；整除由精确上界相等判定；'+v['post_layout']['rule_version']] for t,v in fixed_posts for r in v['post_layout']['post_ranges']]))
         result.append(('定距立柱逐根端距',['材料表 / 材料项','立柱编号','来源原段区间','定距锚向','原段起点端距S（m）','位置'],
                        [[t['name']+' / '+v['name'],str(r['index']),r['range_label'],fixed_directions[r['direction']],r['s'],('构造加柱：'+r['additional_label']) if r['position_kind']=='additional' else {'start':'区间起端','end':'区间终端','interior':'内部定距柱'}[r['position_kind']]] for t,v in fixed_posts for r in v['post_layout']['post_stations']]))
-    added_posts=[(t,v) for t in materials for v in t['material_items'] if v['mode']=='fixed_added_posts']
+    added_posts=[(t,v) for t in materials for v in t['material_items'] if v['mode'] in ('fixed_added_posts','spaced_added_posts')]
     if added_posts:
-        result.append(('构造加柱数量组成',['材料表 / 材料项 / 区间','原定距柱数','构造加柱数','合计根数','规则'],
-                       [[t['name']+' / '+v['name']+' / '+r['label'],str(r['base_post_count']),str(r['additional_post_count']),str(r['post_count']),'保留原定距及余跨，不移柱；'+v['post_layout']['rule_version']] for t,v in added_posts for r in v['post_layout']['post_ranges']]))
+        result.append(('构造加柱数量组成',['材料表 / 材料项 / 区间','原规则柱数' if any(v['mode']=='spaced_added_posts' for t,v in added_posts) else '原定距柱数','构造加柱数','合计根数','规则'],
+                       [[t['name']+' / '+v['name']+' / '+r['label'],str(r['base_post_count']),str(r['additional_post_count']),str(r['post_count']),('保留原均分位置，不移柱或重新分段均分；' if v['mode']=='spaced_added_posts' else '保留原定距及余跨，不移柱；')+v['post_layout']['rule_version']] for t,v in added_posts for r in v['post_layout']['post_ranges']]))
         result.append(('构造加柱端距及依据',['材料表 / 材料项 / 区间','加柱名称','原始S / 单位','标准端距S（m）','构造说明','原始依据'],
                        [[t['name']+' / '+v['name']+' / '+r['label'],a['label'],str(a['s'])+' '+a['s_unit'],a['normalized_s'],a['measurement_basis'],'端距S：'+a['evidence']['s']+'；说明：'+a['evidence']['measurement_basis']] for t,v in added_posts for r in v['post_layout']['post_ranges'] for a in r['additional_posts']]))
     def railing_edge_label(e):
@@ -781,7 +781,10 @@ def export_report(p, q, fmt, approved, template=None, table_data=None, paginatio
             content = [[Paragraph(escape(h), header_style) for h in headers]]+[[para(str(v)) for v in row] for row in rows]
             if len(content) == 1:
                 content.append([para('未提供 / 待编制')]+[para('') for _ in headers[1:]])
-            t = Table(content, colWidths=[260*mm/len(headers)]*len(headers), repeatRows=1, splitInRow=1)
+            # Keep a post's identifier and complete 80-digit station on one page.
+            # Other sections still permit oversized evidence rows to split.
+            t = Table(content, colWidths=[260*mm/len(headers)]*len(headers), repeatRows=1,
+                      splitInRow=0 if title in ('立柱逐根端距','定距立柱逐根端距') else 1)
             t.setStyle(TableStyle([('BACKGROUND', (0,0),(-1,0),colors.HexColor('#'+template['accent'] if template else '#DFEBE6')),
                                   ('GRID',(0,0),(-1,-1),.3,colors.HexColor('#C7D6D0')),
                                   ('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),5),
