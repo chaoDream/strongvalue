@@ -391,6 +391,16 @@ def tables(p, q, approved):
         grouped={}
         for key,eid in item['evidence'].items():grouped.setdefault(eid,[]).append('固定间距' if key=='spacing' and 'direction' in item else labels[key])
         return '\n'.join('、'.join(names)+'：'+eid for eid,names in grouped.items())
+    foundations=[t for t in snapshot['takeoffs'] if t.get('foundation_summary')]
+    if foundations:
+        result.append(('立柱基础体积汇总',['基础构件','来源材料表 / 版本','选入 / 未选立柱项','单组 / 重复 / 全部基础数','未修约 / 修约体积（m³）'],
+                       [[t['name'],t['foundation_summary']['source_name']+' / V'+str(t['foundation_summary']['source_revision']),str(t['foundation_summary']['selected_item_count'])+' / '+str(t['foundation_summary']['unselected_post_item_count']),str(t['foundation_summary']['single_group_count'])+' / '+t['foundation_summary']['multiplicity']+' / '+t['foundation_summary']['total_count'],t['gross']+' / '+t['quantity']] for t in foundations]))
+        result.append(('立柱基础逐项体积',['基础构件 / 立柱项','基础长×宽×高（m）','单组 / 全部根数','单基础体积（m³）','单组 / 全部体积（m³）'],
+                       [[t['name']+' / M'+str(d['material_index'])+' '+d['material_name'],' × '.join(d['normalized_parameters'][k] for k in ('length','width','height')),str(d['single_group_count'])+' / '+d['total_count'],d['single_foundation_volume'],d['single_group_volume']+' / '+d['total_volume']] for t in foundations for d in t['foundation_items']]))
+        result.append(('立柱基础原始尺寸与依据',['基础构件 / 立柱项','原始长宽高及单位','尺寸原件 / 适用范围及依据'],
+                       [[t['name']+' / M'+str(d['material_index'])+' '+d['material_name'],' × '.join(str(d['parameters'][k]) for k in ('length','width','height'))+' '+d['length_unit'],'；'.join(label+'：'+d['evidence'][k] for k,label in [('length','长'),('width','宽'),('height','高')])+'；'+d['measurement_basis']+' 原件：'+d['evidence']['measurement_basis']] for t in foundations for d in t['foundation_items']]))
+        result.append(('立柱基础材料范围与修约',['基础构件','材料、范围、修约及原件'],
+                       [[t['name'],t['material']+' 原件：'+t['source_evidence']['foundation.material']+'；'+t['measurement_basis']+' 原件：'+t['source_evidence']['foundation.basis']+'；'+t['rounding_rule']+'；修约差额'+t['foundation_summary']['rounding_adjustment']+'m³ 原件：'+t['source_evidence']['foundation.rounding']+'；'+t['notice']+'；'+t['rule_version']] for t in foundations]))
     materials=[t for t in snapshot['takeoffs'] if t.get('material_summary')]
     if materials:
         labels={'source_single_length':'来源单组未修约计入长度（m）','single_group_mass':'单组材料质量（kg）','multiplicity':'来源重复数量','unrounded_quantity':'未修约总质量（kg）','rounding_digits':'总质量修约位数','rounding_adjustment':'总质量修约差额（kg）'}

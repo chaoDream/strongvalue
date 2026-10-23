@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from . import store
 from .engine import GEOMETRIES, DomainError, number, precise, quantity_number, takeoff
 
-STRUCTURED_KINDS = ('compound','planar_regions','polygon_region','spatial_regions','surface_faces','design_route','station_trench','volume_balance','pipe_envelope','route_bedding','circular_chamber','chamber_plate','polygon_railing','railing_material')
+STRUCTURED_KINDS = ('compound','planar_regions','polygon_region','spatial_regions','surface_faces','design_route','station_trench','volume_balance','pipe_envelope','route_bedding','circular_chamber','chamber_plate','polygon_railing','railing_material','post_foundation')
 VERSION = 'compound-geometry-1.0'
 PI = '3.1415926535897932384626433832795028841971693993751'
 
@@ -132,6 +132,9 @@ def validate(p, comp, saved=False):
 
 
 def structured_validator(kind):
+    if kind == 'post_foundation':
+        from .post_foundation import validate as validate_foundation
+        return validate_foundation
     if kind == 'railing_material':
         from .railing_material import validate as validate_material
         return validate_material
@@ -175,6 +178,9 @@ def structured_validator(kind):
 
 
 def component_quantity(comp):
+    if comp['kind'] == 'post_foundation':
+        from .post_foundation import calculate as calculate_foundation
+        return calculate_foundation(comp)
     if comp['kind'] == 'railing_material':
         from .railing_material import calculate as calculate_material
         return calculate_material(comp)
