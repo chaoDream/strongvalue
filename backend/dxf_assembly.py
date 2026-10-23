@@ -18,6 +18,23 @@ class AssemblyIn(BaseModel):
     segments:list[AssemblyPart]=Field(min_length=2,max_length=20)
 
 
+class SelectionIn(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    segments:list[AssemblyPart]=Field(min_length=1,max_length=20)
+
+
+def selection(items,segments):
+    selected=SelectionIn.model_validate({'segments':segments}).model_dump()['segments']
+    if len(selected)>1:return assemble(items,selected)
+    part=selected[0]
+    if 'from_point' in part:return fragment(items,part)
+    row=next((r for r in items if r['id']==part['candidate_id']),None)
+    if not row or store.digest(row)!=part['object_hash']:raise HTTPException(409,'所选CAD原对象、原件或任务已变化，请重新读取')
+    if not row['eligible']:raise HTTPException(422,row['issue'])
+    if part['reverse']:return fragment(items,{**part,'from_point':1,'to_point':len(row['points'])})
+    return copy.deepcopy(row)
+
+
 def assemble(items,segments):
     selected=AssemblyIn.model_validate({'segments':segments}).model_dump()['segments']
     sources=[];points=[];ranges=[];joins=[]

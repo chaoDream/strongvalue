@@ -9,7 +9,7 @@ from .engine import precise
 from .dxf_geometry import parse,route_body,VERSION
 from .planar_takeoff import linear
 from .task_execution import original_bytes
-from .dxf_assembly import AssemblyIn,assemble,rebuild
+from .dxf_assembly import AssemblyIn,SelectionIn,assemble,rebuild,selection
 from .dxf_selection import AssemblyPart
 from .dxf_fragments import FragmentIn,fragment,overlaps
 
@@ -160,6 +160,26 @@ def assembly(pid:str,did:str,body:AssemblyIn,a=Depends(core.actor)):
                 'notice':'按明确顺序与方向组成候选；仅合并XYZ精确相同的连接端点，不自动吸附、补段或增加工程量。'}
 
 
+@router.post('/projects/{pid}/documents/{did}/dxf-route-selection')
+def read_selection(pid:str,did:str,body:SelectionIn,a=Depends(core.actor)):
+    with store.connect() as conn:
+        p=core.project(conn,pid,a);doc,data,items=rows(p,did)
+        row=selection(items,body.model_dump()['segments'])
+        return {'candidate':{**row,'object_hash':store.digest(row)},'document_name':doc['name']}
+
+
+@router.get('/projects/{pid}/components/{cid}/dxf-revision-candidate')
+def read_revision(pid:str,cid:str,revision:int=Query(...,ge=1),source_stamp:str=Query(...,pattern=r'^[a-f0-9]{64}$'),a=Depends(core.actor)):
+    with store.connect() as conn:
+        p=core.project(conn,pid,a);comp=core.find(p,'components',cid)
+        if comp['kind']!='design_route' or not comp.get('dxf_trace'):raise HTTPException(422,'此构件没有可恢复的CAD采用序列')
+        if comp['revision']!=revision or comp.get('source_stamp')!=source_stamp:raise HTTPException(409,'原管线版本或来源已变化，请刷新后重新选择')
+        from .route_takeoff import validate
+        validate(p,comp,saved=True)
+        from .dxf_revision import candidate
+        return candidate(comp)
+
+
 @router.post('/projects/{pid}/documents/{did}/dxf-route-candidates/{cid}/preview')
 def preview(pid:str,did:str,cid:str,body:PreviewIn,a=Depends(core.actor)):
     with store.connect() as conn:
@@ -199,9 +219,10 @@ def adopt(pid:str,did:str,cid:str,body:AdoptIn,a=Depends(core.actor)):
         calculated,stamp=validate(p,comp)
         comp.update(state='draft',preview=calculated,
                     evidence=calculated['source_evidence'],source_stamp=stamp)
+        previous=copy.deepcopy(old) if old else None
         core.invalidate(p,'components')
         if old:
-            core.invalidate_component_dependents(p,old['id']);p.setdefault('component_history',[]).append(copy.deepcopy(old))
+            core.invalidate_component_dependents(p,old['id']);p.setdefault('component_history',[]).append(previous)
             p['components'][p['components'].index(old)]=comp
             for t in p['takeoffs']:
                 if t.get('component_id')==old['id']:t['state']='stale'
