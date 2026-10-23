@@ -71,6 +71,11 @@ def validate_sheet(p,row,*,check_conflict=True):
     e,d=source(p,row['evidence_id'],row['document_id'],row['page'],row['raw_text'])
     if row['document_hash']!=d['hash'] or row['evidence_hash']!=store.digest(e):
         raise HTTPException(409,'图纸身份依据已变化，请修订登记并重新复核')
+    trace=row.get('candidate_trace',{})
+    if trace.get('ocr'):
+        from .drawing_candidates import ocr_origin
+        if ocr_origin(p,e,trace['fields'])!=trace['ocr']:
+            raise HTTPException(409,'扫描识别任务或原行依据已变化，请重新登记并复核')
     if check_conflict and any(row['id'] in g['sheet_ids'] for g in conflicts(p)):
         raise HTTPException(409,'同专业同图号有多个当前候选，请先拒绝不采纳登记')
 
@@ -161,6 +166,18 @@ def report_tables(p, current_checks=False):
                             (VIEWS[r[key]] if key=='view_type' else r[key])+('；人工补充或修正：'+r['reason'] if key in trace['corrections'] else '；核对采用'),
                             trace['evidence_id']+' / '+trace['id'],'；'.join(o['raw_text'] for o in original) or '请核对登记原文及人工说明'])
     if adopted:result.append(('图纸身份候选采用',['图纸 / 登记修订','采用规则 / 字段','原文候选值','登记值 / 修正说明','候选证据 / ID','字段摘录'],adopted))
+    ocr_rows=[]
+    for r in sheets:
+        trace=r.get('candidate_trace',{});ocr=trace.get('ocr');verification=trace.get('ocr_verification',{})
+        if not ocr:continue
+        for key,label in labels.items():
+            lines=ocr['field_lines'].get(key,[])
+            ocr_rows.append([r['drawing_no']+' / R'+str(r['revision']),label,
+                ocr['engine']+' / '+str(ocr['revision']),
+                '；'.join(str(line['line'])+'行：'+line['text']+' / 置信度 '+str(line['confidence'])+' / 显示页位置 '+str(line['bbox']) for line in lines) or '无机器候选，人工补填',
+                verification.get('checked_by','')+' / '+verification.get('checked_at','')+' / 已核对原页全部字段',
+                '机器置信度不代表工程准确率；仍须独立复核'])
+    if ocr_rows:result.append(('扫描标题栏字段核对',['图纸 / 修订','字段','识别器 / 版本','识别原行 / 位置','编制人核对记录','边界'],ocr_rows))
     if current_checks and (sheets or refs):
         pending=issues(p)
         if pending:result.append(('图纸校核待办',['当前未解决事项'],[[s] for s in pending]))
@@ -171,13 +188,17 @@ def save_record(pid,collection,body,a,previous_id='',candidate_id=''):
     core.edit(a)
     allowed=({'document_id','page','drawing_no','title','edition','view_type','discipline','evidence_id','raw_text','reason'} if collection=='drawing_sheets' else
              {'from_sheet_id','to_sheet_id','component_name','kind','marker','evidence_id','raw_text','reason'})
-    if set(body)-allowed-({'object_hash'} if previous_id or candidate_id else set()):raise HTTPException(422,'图纸登记含不支持字段')
+    if set(body)-allowed-({'object_hash','ocr_source_checked'} if candidate_id else {'object_hash'} if previous_id else set()):raise HTTPException(422,'图纸登记含不支持字段')
     with store.transaction() as c:
         p=core.project(c,pid,a);old=core.find(p,collection,previous_id) if previous_id else None
         candidate=None
         if candidate_id:
             from .drawing_candidates import require_candidate
             candidate=require_candidate(p,candidate_id,body.get('object_hash'))
+            if candidate.get('ocr') and body.get('ocr_source_checked') is not True:
+                raise HTTPException(422,'请对照扫描原图核对全部字段及人工补填，并确认已核对原页')
+            if not candidate.get('ocr') and 'ocr_source_checked' in body:
+                raise HTTPException(422,'当前候选不是扫描文字识别来源')
             if any(body.get(k)!=candidate[k] for k in ('document_id','page','evidence_id')):
                 raise HTTPException(409,'采用候选须绑定原来的文件、页码和证据；其他来源请人工登记')
         if old:
@@ -199,11 +220,14 @@ def save_record(pid,collection,body,a,previous_id='',candidate_id=''):
             if row['marker'] not in row['raw_text']:raise HTTPException(422,'索引标记须出现在所选原文摘录中')
         row.update(document_hash=d['hash'],evidence_hash=store.digest(e))
         if collection=='drawing_sheets':
-            row['identity_origin']='explicit_labels' if candidate else 'manual_revision' if old else 'manual'
+            row['identity_origin']=('ocr_labels' if candidate.get('ocr') else 'explicit_labels') if candidate else 'manual_revision' if old else 'manual'
             if candidate:
                 row['candidate_trace']={**candidate,'candidate_hash':store.digest(candidate),
                     'corrections':{k:{'suggested':candidate['suggestions'].get(k),'adopted':row[k]}
                                    for k in ('drawing_no','title','edition','view_type') if candidate['suggestions'].get(k)!=row[k]}}
+        if candidate and candidate.get('ocr'):
+            row['candidate_trace']['ocr_verification']={'checked_by':a['username'],'checked_at':row['created_at'],
+                'fields':['drawing_no','title','edition','view_type'],'original_page_checked':True}
         p[collection].append(row)
         core.invalidate(p,'components' if collection=='drawing_sheets' else 'quotes')
         store.audit(c,p,a,'DRAWING_SHEET_RECORDED' if collection=='drawing_sheets' else 'DRAWING_REFERENCE_RECORDED',row)

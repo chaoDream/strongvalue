@@ -57,15 +57,43 @@ def identity_fields(text):
             'raw_text':text[start:min(end,start+2000)],'adoptable':adoptable,'warnings':list(dict.fromkeys(warnings))}
 
 
+def ocr_origin(p, evidence, fields):
+    """Only completed, source-bound OCR can supply machine label candidates."""
+    from .ocr import validate_lines
+    meta=evidence.get('ocr',{})
+    from .evidence_regions import SPACE
+    if not isinstance(meta,dict) or not isinstance(meta.get('engine'),str) or not meta['engine'] or meta.get('coordinate_space')!=SPACE:return None
+    if type(meta.get('revision')) is not int or meta['revision']<1:return None
+    job=next((j for j in p['jobs'] if j['id']==meta.get('job_id')),None)
+    if not job or job.get('kind')!='local_ocr' or job.get('state')!='completed':return None
+    if any(job.get(k)!=v for k,v in {'evidence_id':evidence['id'],'document_id':evidence['document_id'],
+            'source_hash':evidence.get('document_hash'),'page':evidence.get('page'),'engine':meta.get('engine')}.items()):return None
+    try:lines=validate_lines(meta)
+    except (ValueError,TypeError,AttributeError):return None
+    if evidence['text']!='\n'.join(line['text'] for line in lines):return None
+    positions=[];offset=0
+    for index,line in enumerate(lines):
+        positions.append({'line':index+1,'start':offset,'end':offset+len(line['text']),**line})
+        offset+=len(line['text'])+1
+    return {'engine':meta['engine'],'revision':meta.get('revision'),'job_id':job['id'],
+            'coordinate_space':meta.get('coordinate_space'),
+            'field_lines':{key:[line for line in positions if any(line['start']<o['end'] and line['end']>o['start'] for o in occurrences)]
+                           for key,occurrences in fields.items()},
+            'notice':'扫描识别文字可能出错；须对照原页核对全部字段及人工补填，不以置信度判定正确。'}
+
+
 def candidates(p):
     docs={d['id']:d for d in p['documents'] if not d.get('superseded') and Path(d['name']).suffix.lower() in ('.pdf','.dxf','.dwg','.ifc')}
     out=[]
     for e in p['evidence']:
         d=docs.get(e['document_id'])
-        if not d or e.get('method') not in ('local_text','manual') or e.get('document_hash')!=d['hash']:continue
+        if not d or e.get('method') not in ('local_text','manual','local_ocr') or e.get('document_hash')!=d['hash']:continue
         if d['name'].lower().endswith('.pdf') and (type(e.get('page')) is not int or e['page']<1):continue
         result=identity_fields(e['text'])
         if not result:continue
+        ocr=ocr_origin(p,e,result['fields']) if e.get('method')=='local_ocr' else None
+        if e.get('method')=='local_ocr' and ocr is None:continue
+        if ocr:result.update(ocr=ocr,warnings=[ocr['notice'],*result['warnings']])
         out.append({'id':store.digest({'version':VERSION,'document_id':d['id'],'evidence_id':e['id']})[:32],
                     'parser_version':VERSION,'document_id':d['id'],'document_hash':d['hash'],'document_name':d['name'],
                     'page':e['page'] if d['name'].lower().endswith('.pdf') else None,'discipline':d['specialty'],

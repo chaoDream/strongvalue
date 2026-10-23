@@ -35,8 +35,9 @@ def test_unreviewed_evidence_source_and_idempotency(clients,monkeypatch):
     assert after['components']==before['components'] and after['facts']==before['facts'] and after['quotes']==before['quotes']
     assert submit(c,url,d).json()['state']=='completed' and calls==[1]
     assert len(get(c,pid)['evidence'])==len(after['evidence'])
-    # OCR is deliberately not treated as a verified local-text title block.
-    assert c.get(f'/api/v1/projects/{pid}/drawing-candidates').json()['candidates']==[]
+    # Machine candidates remain distinct from source PDF text and need explicit original-page confirmation.
+    candidate=c.get(f'/api/v1/projects/{pid}/drawing-candidates').json()['candidates'][0]
+    assert candidate['source_method']=='local_ocr' and candidate['ocr'] and not after['drawing_sheets']
 
 
 @pytest.mark.parametrize('page',[0,-1,2,501,True,'1',1.5])
