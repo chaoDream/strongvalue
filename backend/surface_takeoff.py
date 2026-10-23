@@ -112,7 +112,7 @@ def candidates(p, cid):
     result = boundary(source)
     notice=source_notice(source)
     if source['kind']=='polygon_region':
-        from .polygon_cap_partitions import NOTICE as notice
+        from .polygon_line_partitions import NOTICE as notice
     base_faces=result['faces']
     if source['kind']=='polygon_region':
         from .polygon_cap_partitions import editor_faces
@@ -129,7 +129,7 @@ def partition(source, subdivisions):
     if not subdivisions:
         return result
     if source['kind'] == 'polygon_region':
-        from .polygon_cap_partitions import partition as partition_sides
+        from .polygon_line_partitions import partition as partition_sides
         return partition_sides(source, subdivisions, result)
     originals = {f['face_id']: f for f in result['faces']}
     by_id, records, faces = {}, [], []
@@ -204,7 +204,7 @@ def partition_candidates(p, body):
     check_sources(p, result['source_evidence'])
     notice=source_notice(source)
     if source['kind']=='polygon_region':
-        from .polygon_cap_partitions import NOTICE as notice
+        from .polygon_line_partitions import NOTICE as notice
     base_faces=boundary(source)['faces']
     if source['kind']=='polygon_region':
         from .polygon_cap_partitions import editor_faces
@@ -272,6 +272,9 @@ def calculate(comp, source=None):
         if result.get('surface_cap_partition_checks'):
             from .polygon_cap_partitions import VERSION as cap_version, ROUNDING as cap_rounding, NOTICE as cap_notice
             output.update(surface_cap_partition_checks=result['surface_cap_partition_checks'], rule_version=cap_version, rounding_rule=cap_rounding, notice=cap_notice)
+        if result.get('surface_partition_lines'):
+            from .polygon_line_partitions import VERSION as line_version, ROUNDING as line_rounding, NOTICE as line_notice
+            output.update(surface_partition_lines=result['surface_partition_lines'], rule_version=line_version, rounding_rule=line_rounding, notice=line_notice)
     return output
 
 

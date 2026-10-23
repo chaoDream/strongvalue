@@ -432,6 +432,18 @@ def tables(p, q, approved):
                        [[t['name']+' / F'+str(f['index']), f['position'], 'R'+str(c['ring_index'])+(' 外轮廓' if c['role']=='outer' else ' 孔'),
                          c['area'], f['area'], f['cap_clip_rule']]
                         for t in snapshot['takeoffs'] for f in t.get('surface_faces',[]) if f.get('cap_clip_rule') for c in f['cap_clip_rings']]))
+    line_cuts = [(t, line) for t in snapshot['takeoffs'] for line in t.get('surface_partition_lines', [])]
+    if line_cuts:
+        result.append(('净面斜线分割依据', ['构件 / 原面 / 斜线', '两点原始坐标 / 单位', '逐坐标依据', '规范式（X/Y单位m）', '分割做法 / 原始依据', '规则'],
+                       [[t['name']+' / 原F'+str(c['parent_index'])+' / L'+str(c['line_index']),
+                         '('+c['original']['x1']+', '+c['original']['y1']+') → ('+c['original']['x2']+', '+c['original']['y2']+') '+c['original']['unit']+'；无限延伸',
+                         '；'.join(k.upper()+': '+v for k,v in c['original']['evidence'].items()),
+                         c['coefficients'][0]+'×X + ('+c['coefficients'][1]+')×Y + ('+c['coefficients'][2]+') = 0；正负侧由此式确定',
+                         c['original']['basis']+' / '+c['original']['evidence_id'], c['rule_version']] for t,c in line_cuts]))
+        result.append(('净面斜线裁剪范围', ['构件 / 净区', '斜线规范侧', '凸框顶点', 'XY坐标（m，80位显示）', '净面积（m²）', '说明'],
+                       [[t['name']+' / F'+str(f['index']), '、'.join('L'+str(c['line_index'])+('正侧' if c['positive'] else '负侧') for c in f['cap_cut_sides']),
+                         'P'+str(i), '('+p['x']+', '+p['y']+')', f['area'], '凸框仅界定裁剪范围，须与原外轮廓及孔相交；不是净区外轮廓。精确有理数见JSON']
+                        for t in snapshot['takeoffs'] for f in t.get('surface_faces', []) if f.get('cap_clip_domain') for i,p in enumerate(f['cap_clip_domain'],1)]))
     if not q:
         from .main import blockers
         next(table[2] for table in result if table[0] == '缺项与警示').extend([[x] for x in blockers(p)])
