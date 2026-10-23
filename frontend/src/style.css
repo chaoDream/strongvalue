@@ -2777,3 +2777,7 @@ input::placeholder,textarea::placeholder {
 
 .supplier-inquiry-history { margin:16px 20px; overflow-wrap:anywhere; }
 .supplier-inquiry-history article { padding:12px 0; border-bottom:1px solid #edf0eb; }
+
+.dxf-route-panel table { table-layout:fixed; white-space:normal; }
+.dxf-route-panel td { overflow-wrap:anywhere; }
+.dxf-route-panel > .field { margin:16px 20px; }

@@ -107,11 +107,16 @@ def calculate(comp):
 def validate(p, comp, saved=False):
     from .main import require_evidence, find
     from .task_execution import original_bytes
+    if 'dxf_trace' in comp:
+        from .dxf_routes import validate_trace
+        validate_trace(p,comp)
     result = calculate(comp)
-    sources, checked = {}, set()
+    sources, checked, evidence_cache = {}, set(), {}
     for key, eid in result['source_evidence'].items():
-        ev = require_evidence(p, eid)
-        doc = find(p, 'documents', ev['document_id'])
+        if eid not in evidence_cache:
+            ev=require_evidence(p,eid);doc=find(p,'documents',ev['document_id'])
+            evidence_cache[eid]=(ev,doc)
+        ev,doc=evidence_cache[eid]
         if ev['document_hash'] != doc['hash']:
             raise HTTPException(409, '管线坐标依据与原件校验值不一致')
         if doc['hash'] not in checked:

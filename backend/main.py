@@ -20,7 +20,7 @@ from .compound_takeoff import component_quantity, structured_validator, STRUCTUR
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.48.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.49.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -91,7 +91,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes', 'supplier_quote_adoptions', 'supplier_inquiry_reopenings']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes', 'supplier_quote_adoptions', 'supplier_inquiry_reopenings', 'dxf_route_adoptions']:
         p.setdefault(key, [])
     return p
 
@@ -532,6 +532,9 @@ def require_evidence(p, eid):
     e = find(p, 'evidence', eid)
     if find(p, 'documents', e['document_id']).get('superseded'):
         raise HTTPException(409, '证据已过期，请引用当前图纸')
+    if 'dxf_geometry' in e or e.get('method')=='dxf_geometry':
+        from .dxf_routes import validate_geometry_evidence
+        validate_geometry_evidence(p,e)
     if 'ocr_transcription' in e:
         from .ocr_transcriptions import validate_transcription
         validate_transcription(p,e)
@@ -573,6 +576,12 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
     with store.transaction() as c:
         p = project(c, pid, a)
         old = find(p, 'components', cid) if cid else None
+        detach_reason=None
+        if body.get('kind')=='design_route':
+            from .dxf_routes import manual_body
+            body,detach_reason=manual_body(p,body,old)
+            if 'dxf_trace' in body and (not old or body['dxf_trace']!=old.get('dxf_trace')):
+                raise HTTPException(409,'DXF来源仅能通过原对象校核采用入口新增或替换')
         compound = body.get('kind') in STRUCTURED_KINDS
         if old and (compound or old['kind'] in STRUCTURED_KINDS):
             if body.get('object_hash') != store.digest(old):
@@ -597,6 +606,7 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
                 fields += ['quantity_type','source_component_id','source_component_hash','stations','method','geology_basis','geology_evidence_id','construction_basis','construction_evidence_id','rounding_digits','rounding_evidence_id']
             elif body['kind'] == 'design_route':
                 fields += ['route_points','quantity_type','coordinate_basis','coordinate_evidence_id','multiplicity','multiplicity_evidence_id','rounding_digits','rounding_evidence_id']
+                if 'dxf_trace' in body:fields += ['dxf_trace']
             elif body['kind'] == 'surface_faces':
                 fields += ['quantity_type','purpose','source_component_id','source_component_hash','face_decisions']
                 if 'face_subdivisions' in body: fields += ['face_subdivisions']
@@ -631,6 +641,7 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
                     t['state'] = 'stale'
         else:
             p['components'].append(comp)
+        if detach_reason:store.audit(c,p,a,'DXF_ROUTE_DETACHED',{'component_id':comp['id'],'previous_trace':old['dxf_trace'],'reason':detach_reason})
         store.audit(c, p, a, 'COMPONENT_UPDATED' if old else 'COMPONENT_CREATED', comp)
         store.save(c, p)
     return comp
@@ -700,6 +711,9 @@ def preview_component(pid: str, body: dict, a=Depends(actor)):
         p = project(c, pid, a)
         if body.get('kind') not in STRUCTURED_KINDS:
             raise HTTPException(422, '此预览用于分项、区域、表面或设计管线算量')
+        if body.get('kind')=='design_route':
+            from .dxf_routes import manual_body
+            body,_=manual_body(p,body,find(p,'components',body['id']) if body.get('id') else None)
         result, stamp = structured_validator(body['kind'])(p, body)
     return {**result, 'source_stamp': stamp}
 
@@ -1152,6 +1166,7 @@ def quote(pid: str, a=Depends(actor)):
         snapshot['supplier_quotes']=p['supplier_quotes']
         snapshot['supplier_quote_adoptions']=p['supplier_quote_adoptions']
         snapshot['supplier_inquiry_reopenings']=p['supplier_inquiry_reopenings']
+        snapshot['dxf_route_adoptions']=p['dxf_route_adoptions']
         from .scoped_rules import validate as validate_scoped
         validate_scoped(p, ruleset)
         result = calculate(p['boq'], ruleset, current_structure(p))
@@ -1192,7 +1207,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.48.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.49.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 def persist_export(c, p, a, format='pdf', quote_id='', template_id='', unpriced=False):
@@ -1348,6 +1363,9 @@ app.include_router(transcription_facts_router)
 
 from .supplier_quotes import router as supplier_quotes_router
 app.include_router(supplier_quotes_router)
+
+from .dxf_routes import router as dxf_routes_router
+app.include_router(dxf_routes_router)
 
 dist = Path(__file__).parent.parent/'frontend'/'dist'
 if dist.exists():

@@ -135,6 +135,13 @@ def tables(p, q, approved):
               ('审核记录', ['对象类型', '对象 ID', '决定', '复核人', '时间', '依据', '对象哈希'],
                [[r['collection'], r['object_id'], r['decision'], r['reviewer'], r['timestamp'], r['reason'], r['object_hash']] for r in snapshot['reviews']+report_reviews]),
               ('缺项与警示', ['事项'], [[x] for x in ((q['warnings'] if q else [])+(['当前版本已失效；源输入已变更'] if q and q['id'] in p['stale_quotes'] else []))])]
+    dxf_routes=snapshot.get('dxf_route_adoptions',[])
+    if dxf_routes:
+        result.append(('DXF坐标采用与单位校核',['管线 / 修订','原CAD对象','已知两点距离 / CAD距离','容差 / 偏差','采用核对依据','操作人 / 时间'],
+            [[x.get('component_name',x['component_id'])+' / V'+str(x['component_revision']),t['candidate']['document_id']+' / '+t['candidate']['kind']+' '+t['candidate']['handle']+' / '+t['candidate']['layer']+' / '+t['candidate']['unit'],
+              'P'+str(t['calibration']['from_point'])+'–P'+str(t['calibration']['to_point'])+'：'+t['calibration']['known_distance_m']+'m / '+t['calibration']['cad_distance_m']+'m',
+              t['calibration']['tolerance_m']+'m / '+t['calibration']['delta_m']+'m',t['reason']+' / 校核证据 '+t['proofs']['calibration']['evidence_id'],
+              t['author']+' / '+t['created_at']] for x in dxf_routes for t in [x['trace']]]))
     offers=snapshot.get('supplier_quotes',[])
     if offers:
         result.append(('供应商报价登记',['资源 / 清单','供应商 / 报价单','单价 / 税制 / 地区','期次 / 有效期','供货条件 / 登记依据','状态 / 原始证据'],

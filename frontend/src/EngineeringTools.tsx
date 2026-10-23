@@ -20,6 +20,7 @@ const BeddingTakeoffPanel=React.lazy(()=>import('./BeddingTakeoffPanel'));
 const PipeEnvelopePanel=React.lazy(()=>import('./PipeEnvelopePanel'));
 const VolumeBalancePanel=React.lazy(()=>import('./VolumeBalancePanel'));
 const TrenchTakeoffPanel=React.lazy(()=>import('./TrenchTakeoffPanel'));
+const DXFRoutesPanel=React.lazy(()=>import('./DXFRoutesPanel'));
 const RouteTakeoffPanel=React.lazy(()=>import('./RouteTakeoffPanel'));
 const SurfaceTakeoffPanel=React.lazy(()=>import('./SurfaceTakeoffPanel'));
 const SpatialTakeoffPanel=React.lazy(()=>import('./SpatialTakeoffPanel'));
@@ -127,6 +128,7 @@ export default function EngineeringTools({section,p,user,request,refresh,onRevie
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取检查井与管网体积…</p>}><ChamberPlatePanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/><ChamberTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/><BeddingTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/><PipeEnvelopePanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取回填平衡…</p>}><VolumeBalancePanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取变断面沟槽…</p>}><TrenchTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
+  {section==='takeoff'&&<React.Suspense fallback={<p>正在读取CAD坐标…</p>}><DXFRoutesPanel key={p.id} p={p} user={user} request={request} refresh={refresh}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取设计管线…</p>}><RouteTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取空间构件…</p>}><SpatialTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取表面算量…</p>}><SurfaceTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
