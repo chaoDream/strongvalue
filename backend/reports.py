@@ -387,7 +387,7 @@ def tables(p, q, approved):
         if intersections:
             result.append(('空间相交定位', ['构件', '加扣', '长方体A', '长方体B', '两两相交体积（m³）', '说明'], intersections))
     def material_proofs(item):
-        labels={'quantity':'每组数量','unit_weight':'单位质量','length':'展开长度','width':'展开宽度','x':'X起距','y':'Y起距','cut_length':'下料长度','measurement_basis':'说明','coordinate_basis':'展开坐标口径'}
+        labels={'quantity':'每组数量','unit_weight':'单位质量','length':'展开长度','width':'展开宽度','x':'X起距','y':'Y起距','cut_length':'下料长度','measurement_basis':'说明','coordinate_basis':'展开坐标口径','spacing':'最大间距','start_post':'起端归属','end_post':'终端归属'}
         grouped={}
         for key,eid in item['evidence'].items():grouped.setdefault(eid,[]).append(labels[key])
         return '\n'.join('、'.join(names)+'：'+eid for eid,names in grouped.items())
@@ -422,6 +422,17 @@ def tables(p, q, approved):
         result.append(('异形板网片孔边界校验',['材料表 / 板片','轮廓或孔A / 孔B','关系','结论'],
                        [[t['name']+' / '+v['name'],c['left']+' / '+c['right'],'严格在内且不接触外边界' if c['relation']=='strictly_inside' else '孔间分离，无接触、重叠或包含','通过'] for t,v in polygon_panels for c in v['panel_geometry']['polygon_checks']]+
                        [[t['name']+' / '+v['name'],'无孔','明确仅外轮廓','简单外轮廓通过'] for t,v in polygon_panels if not v['panel_geometry']['polygon_checks']]))
+    posts=[(t,v) for t in materials for v in t['material_items'] if v['mode']=='spaced_posts']
+    if posts:
+        result.append(('立柱均分布置质量',['材料表 / 材料项','来源S口径','单组根数','每根下料长（m）','每米质量（kg/m）','单组总长 / 质量','原始下料长及每米质量','规则与依据'],
+                       [[t['name']+' / '+v['name'],t['material_summary']['source_length_basis'],v['normalized_quantity'],v['single_member_length'],v['normalized_unit_weight'],v['single_group_stock_length']+' m / '+v['single_group_mass']+' kg',str(v['cut_length'])+' '+v['length_unit']+' / '+str(v['unit_weight'])+' '+v['weight_unit'],v['measurement_basis']+'；'+material_proofs(v)+'；'+v['post_layout']['notice']] for t,v in posts]))
+        result.append(('立柱逐区间间距与归属',['材料表 / 材料项 / 区间','起终S（m）','最大间距原值','标准最大 / 均分跨间距（m）','跨间 / 内部柱','起端 / 终端计入','本区间根数','说明及逐参数依据'],
+                       [[t['name']+' / '+v['name']+' / '+r['label'],r['s_from']+' → '+r['s_to'],str(r['spacing'])+' '+r['spacing_unit'],r['normalized_spacing']+' / '+r['actual_spacing'],str(r['interval_count'])+' / '+str(r['interior_count']),('计入' if r['start_post'] else '不计')+' / '+('计入' if r['end_post'] else '不计'),str(r['post_count']),r['measurement_basis']+'；'+material_proofs(r)] for t,v in posts for r in v['post_layout']['post_ranges']]))
+        def fraction_text(r):return r['numerator'] if r['denominator']=='1' else r['numerator']+' / '+r['denominator']
+        result.append(('立柱跨间数精确校验',['材料表 / 材料项 / 区间','最小正整数N','下界(N−1)²×间距²','未修约区间长度²','上界N²×间距²','严格关系及规则'],
+                       [[t['name']+' / '+v['name']+' / '+r['label'],str(r['interval_count']),fraction_text(r['ceil_certificate']['lower_spacing_square']),fraction_text(r['ceil_certificate']['range_length_square']),fraction_text(r['ceil_certificate']['upper_spacing_square']),'下界 < 区间长度² ≤ 上界；'+v['post_layout']['rule_version']] for t,v in posts for r in v['post_layout']['post_ranges']]))
+        result.append(('立柱逐根端距',['材料表 / 材料项','立柱编号','来源原段区间','均分节点号','原段起点端距S（m）','位置'],
+                       [[t['name']+' / '+v['name'],str(r['index']),r['range_label'],str(r['bay_index']),r['s'],{'start':'区间起端','end':'区间终端','interior':'内部均分柱'}[r['position_kind']]] for t,v in posts for r in v['post_layout']['post_stations']]))
     def railing_edge_label(e):
         return 'S'+str(e['edge_index']) if e['role']=='route' else 'R'+str(e['ring_index'])+' E'+str(e['edge_index'])
     railings = [t for t in snapshot['takeoffs'] if t.get('railing_summary')]
