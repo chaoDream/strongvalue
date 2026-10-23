@@ -112,7 +112,7 @@ def candidates(p, cid):
     result = boundary(source)
     notice=source_notice(source)
     if source['kind']=='polygon_region':
-        from .polygon_connected_partitions import CANDIDATE_NOTICE as notice
+        from .polygon_point_contacts import CANDIDATE_NOTICE as notice
     base_faces=result['faces']
     if source['kind']=='polygon_region':
         from .polygon_cap_partitions import editor_faces
@@ -204,7 +204,7 @@ def partition_candidates(p, body):
     check_sources(p, result['source_evidence'])
     notice=source_notice(source)
     if source['kind']=='polygon_region':
-        from .polygon_connected_partitions import CANDIDATE_NOTICE as notice
+        from .polygon_point_contacts import CANDIDATE_NOTICE as notice
     base_faces=boundary(source)['faces']
     if source['kind']=='polygon_region':
         from .polygon_cap_partitions import editor_faces
@@ -279,6 +279,9 @@ def calculate(comp, source=None):
             from .polygon_connected_partitions import VERSION as connected_version, ROUNDING as connected_rounding, NOTICE as connected_notice
             output.update(surface_cap_component_checks=result['surface_cap_component_checks'],surface_cap_clip_sources=result['surface_cap_clip_sources'],
                           rule_version=connected_version,rounding_rule=connected_rounding,notice=connected_notice)
+        if result.get('surface_point_contact_checks'):
+            from .polygon_point_contacts import VERSION as contact_version, ROUNDING as contact_rounding, NOTICE as contact_notice
+            output.update(surface_point_contact_checks=result['surface_point_contact_checks'],rule_version=contact_version,rounding_rule=contact_rounding,notice=contact_notice)
     return output
 
 

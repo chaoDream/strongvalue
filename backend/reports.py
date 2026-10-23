@@ -446,6 +446,17 @@ def tables(p, q, approved):
                        [[t['name']+' / 原F'+str(c['parent_index'])+' / 区'+str(c['clip_index']),
                          '原R'+str(r['ring_index'])+(' 外轮廓' if r['role']=='outer' else ' 孔'),r['area'],c['area'],c['cap_clip_rule'],c['position']]
                         for t in snapshot['takeoffs'] for c in t.get('surface_cap_clip_sources',[]) for r in c['cap_clip_rings']]))
+    point_contacts=[(t,c) for t in snapshot['takeoffs'] for c in t.get('surface_point_contact_checks',[])]
+    if point_contacts:
+        result.append(('点接触处理依据', ['构件 / 原面 / 裁剪区','口径','接点 / 净块 / 重访边界数','处理说明','原始依据','规则'],
+                       [[t['name']+' / 原F'+str(c['parent_index'])+' / 区'+str(c['clip_index']),'净区内部连通；零宽接点不合并面积块',
+                         str(c['contact_count'])+' / '+str(c['component_count'])+' / '+str(c['repeated_vertex_walks']),c['setting']['basis'],c['setting']['evidence_id'],c['rule_version']] for t,c in point_contacts]))
+        result.append(('接点边界配对记录', ['构件 / 原面 / 裁剪区','接点XY（m）','边界组','进入邻点XY（m）','离开邻点XY（m）','说明'],
+                       [[t['name']+' / 原F'+str(c['parent_index'])+' / 区'+str(c['clip_index']),
+                         '('+p['point']['x']+', '+p['point']['y']+')',str(j)+' / '+str(p['degree']),
+                         '('+pair['incoming_from']['x']+', '+pair['incoming_from']['y']+')','('+pair['outgoing_to']['x']+', '+pair['outgoing_to']['y']+')',
+                         '净区在左侧的精确边界追踪；不推断工程连接，精确分数见JSON']
+                        for t,c in point_contacts for p in c['contacts'] for j,pair in enumerate(p['pairings'],1)]))
     line_cuts = [(t, line) for t in snapshot['takeoffs'] for line in t.get('surface_partition_lines', [])]
     if line_cuts:
         result.append(('净面斜线分割依据', ['构件 / 原面 / 斜线', '两点原始坐标 / 单位', '逐坐标依据', '规范式（X/Y单位m）', '分割做法 / 原始依据', '规则'],

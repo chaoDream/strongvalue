@@ -3,7 +3,7 @@ from collections import Counter, defaultdict
 from decimal import Decimal, localcontext
 from fractions import Fraction
 from . import store
-from .compound_takeoff import op
+from .compound_takeoff import op, text
 from .engine import DomainError, precise, quantity_number
 from .polygon_cap_partitions import checked, decimal, rational
 from .polygon_line_partitions import clip, canonical_polygon
@@ -32,7 +32,7 @@ def contour(points, positive):
     return canonical_polygon(points)
 
 
-def separate(rings, domain, budget):
+def separate(rings, domain, budget, contacts=None):
     """Clip oriented rings, atomize collinear overlaps, cancel directed bridges.
 
     No snapping or geometric epsilon is used. Degree > 1 is an explicit ambiguity
@@ -66,10 +66,18 @@ def separate(rings, domain, budget):
     outgoing = defaultdict(list); incoming = defaultdict(list)
     for a,b in remaining:
         outgoing[a].append(b); incoming[b].append(a)
-    if any(len(outgoing[p]) != 1 or len(incoming[p]) != 1 for p in set(outgoing)|set(incoming)):
+    if contacts is None and any(len(outgoing[p]) != 1 or len(incoming[p]) != 1 for p in set(outgoing)|set(incoming)):
         raise DomainError('净区边界存在点接触或分支，不能自动分块；请进一步分割并核定实际范围')
     loops = []
-    while remaining:
+    if contacts is not None:
+        from .polygon_point_contacts import trace_loops
+        budget[0]+=2*sum(len(v)**2 for v in outgoing.values())
+        if budget[0]>MAX_EDGE_TESTS:
+            raise DomainError('接点边界处理超过2000000次精确校验预算，请拆分计量范围')
+        loops = [(points,signed_area(points)) for points in trace_loops(remaining,outgoing,incoming,contacts)]
+        if any(value==0 for _,value in loops):
+            raise DomainError('接点追踪得到零面积闭环，请核对原始轮廓与分割范围')
+    while contacts is None and remaining:
         start = min(remaining)[0]; points = []; p = start
         while True:
             points.append(p); q = outgoing[p][0]
@@ -129,8 +137,18 @@ def label_point(part, budget):
 def partition(source, groups, original):
     from .polygon_line_partitions import partition as clipped
     originals = {f['face_id']:f for f in original['faces']}
-    selected = set(); legacy = []
+    selected = set(); legacy = []; contact_modes = {}
     for group in groups:
+        if isinstance(group,dict) and 'point_contact' in group:
+            setting=group['point_contact']; fid=group.get('face_id')
+            if group.get('separate_regions') is not True or not isinstance(fid,str) or fid not in originals or originals[fid]['geometry_type']!='polygon_cap':
+                raise DomainError('点接触口径仅用于已启用独立净块的上下原面')
+            if not isinstance(setting,dict) or set(setting)!={'mode','basis','evidence_id'} or setting['mode']!='interior':
+                raise DomainError('点接触须明确内部连通口径、说明和原始依据；停用时移除此字段')
+            text(setting['basis'],'点接触内部连通处理说明')
+            text(setting['evidence_id'],'点接触处理原始依据',200)
+            contact_modes[fid]=setting
+            group={k:v for k,v in group.items() if k!='point_contact'}
         if isinstance(group,dict) and 'separate_regions' in group:
             fid = group.get('face_id')
             if group['separate_regions'] is not True or not isinstance(fid,str) or fid not in originals or originals[fid]['geometry_type']!='polygon_cap':
@@ -142,7 +160,9 @@ def partition(source, groups, original):
     result = clipped(source, legacy, original)
     if not selected:
         return result
-    faces = []; checks = []; source_clips = []; budget = [0]; per_parent = Counter()
+    faces = []; checks = []; source_clips = []; budget = [0]; per_parent = Counter(); contact_checks=[]
+    for i,(fid,setting) in enumerate(contact_modes.items(),1):
+        result['source_evidence'][f'cap_contact.{i}.basis']=setting['evidence_id']
     for f in result['faces']:
         parent = f.get('parent_face_id')
         if parent not in selected:
@@ -153,7 +173,14 @@ def partition(source, groups, original):
             x0,x1,y0,y1 = [Fraction(f[k]) for k in ('u_from','u_to','v_from','v_to')]
             domain = [(x0,y0),(x1,y0),(x1,y1),(x0,y1)]
         rings = [[(Fraction(p['x']),Fraction(p['y'])) for p in r['points']] for r in f['boundary_rings']]
-        pieces = separate(rings, domain, budget)
+        contacts=[] if parent in contact_modes else None
+        pieces = separate(rings, domain, budget, contacts)
+        active_rule=RULE
+        if contacts is not None:
+            from .polygon_point_contacts import RULE as active_rule
+            contact_checks.append({'parent_face_id':parent,'parent_index':f['parent_index'],'clip_parent_face_id':f['face_id'],'clip_index':f['sub_index'],
+                'setting':contact_modes[parent],'contact_count':len(contacts),'contacts':contacts,'component_count':len(pieces),
+                'repeated_vertex_walks':sum(len(points)!=len(set(points)) for part in pieces for points,_ in part),'rule_version':active_rule})
         expected = Fraction(int(f['cap_rational_area']['numerator']),int(f['cap_rational_area']['denominator']))
         actual = checked(sum((sum((v for _,v in part),Fraction(0)) for part in pieces),Fraction(0)))
         if actual != expected or not pieces:
@@ -171,14 +198,15 @@ def partition(source, groups, original):
                     'points':[{'x':str(decimal(x)),'y':str(decimal(y)),'exact_x':rational(x),'exact_y':rational(y)} for x,y in points]})
             identity = [[[str(x),str(y)] for x,y in points] for points,_ in part]
             frac = rational(net)
-            generated.append({**f,'face_id':store.digest({'parent':parent,'contours':identity,'rule':RULE}),
+            generated.append({**f,'face_id':store.digest({'parent':parent,'contours':identity,'rule':active_rule}),
                 'sub_index':per_parent[parent],'label':f['label']+f' · 独立块{ci}',
                 'clip_parent_face_id':f['face_id'],'clip_parent_index':f['index'],'cap_component_index':ci,'cap_component_count':len(pieces),
                 'position':f['position']+f'；原裁剪区第{f["sub_index"]}区 / 独立块{ci}，范围按派生边界坐标',
                 'calculation':f'派生连通外面积 {decimal(part[0][1])} − 派生孔面积 {decimal(-sum((v for _,v in part[1:]),Fraction(0)))}',
                 'area':str(quantity_number(decimal(net))),'cap_rational_area':frac,
                 'formula_ast':op('divide',{'constant':frac['numerator']},{'constant':frac['denominator']}),
-                'cap_clip_rule':RULE,'cap_component_rings':contours,'cap_label_point':label_point(part,budget),
+                'cap_clip_rule':active_rule,'cap_component_rings':contours,'cap_label_point':label_point(part,budget),
+                **({'cap_contact_markers':[c['point'] for c in contacts if any(exact_point(c['point']) in points for points,_ in part)]} if contacts is not None else {}),
                 'cap_clip_rings':[{k:v for k,v in r.items() if k!='points'} for r in contours]})
         with localcontext() as ctx:
             ctx.prec = 200; display_sum = sum((Decimal(c['area']) for c in generated),Decimal(0))
@@ -204,4 +232,6 @@ def partition(source, groups, original):
         cap_checks.append(c)
     result.update(faces=[{**f,'index':i+1} for i,f in enumerate(faces)],surface_cap_component_checks=checks,surface_cap_clip_sources=source_clips,
         surface_cap_partition_checks=cap_checks,normal_totals={k:str(v) for k,v in totals.items()},total_area=str(sum((Decimal(f['area']) for f in faces),Decimal(0))))
+    if contact_checks:
+        result['surface_point_contact_checks']=contact_checks
     return result
