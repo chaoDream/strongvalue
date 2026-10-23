@@ -387,9 +387,9 @@ def tables(p, q, approved):
         if intersections:
             result.append(('空间相交定位', ['构件', '加扣', '长方体A', '长方体B', '两两相交体积（m³）', '说明'], intersections))
     def material_proofs(item):
-        labels={'quantity':'每组数量','unit_weight':'单位质量','length':'展开长度','width':'展开宽度','x':'X起距','y':'Y起距','cut_length':'下料长度','measurement_basis':'说明','coordinate_basis':'展开坐标口径','spacing':'最大间距','start_post':'起端归属','end_post':'终端归属'}
+        labels={'quantity':'每组数量','unit_weight':'单位质量','length':'展开长度','width':'展开宽度','x':'X起距','y':'Y起距','cut_length':'下料长度','measurement_basis':'说明','coordinate_basis':'展开坐标口径','spacing':'最大间距','start_post':'起端归属','end_post':'终端归属','direction':'定距锚向'}
         grouped={}
-        for key,eid in item['evidence'].items():grouped.setdefault(eid,[]).append(labels[key])
+        for key,eid in item['evidence'].items():grouped.setdefault(eid,[]).append('固定间距' if key=='spacing' and 'direction' in item else labels[key])
         return '\n'.join('、'.join(names)+'：'+eid for eid,names in grouped.items())
     materials=[t for t in snapshot['takeoffs'] if t.get('material_summary')]
     if materials:
@@ -433,6 +433,18 @@ def tables(p, q, approved):
                        [[t['name']+' / '+v['name']+' / '+r['label'],str(r['interval_count']),fraction_text(r['ceil_certificate']['lower_spacing_square']),fraction_text(r['ceil_certificate']['range_length_square']),fraction_text(r['ceil_certificate']['upper_spacing_square']),'下界 < 区间长度² ≤ 上界；'+v['post_layout']['rule_version']] for t,v in posts for r in v['post_layout']['post_ranges']]))
         result.append(('立柱逐根端距',['材料表 / 材料项','立柱编号','来源原段区间','均分节点号','原段起点端距S（m）','位置'],
                        [[t['name']+' / '+v['name'],str(r['index']),r['range_label'],str(r['bay_index']),r['s'],{'start':'区间起端','end':'区间终端','interior':'内部均分柱'}[r['position_kind']]] for t,v in posts for r in v['post_layout']['post_stations']]))
+    fixed_posts=[(t,v) for t in materials for v in t['material_items'] if v['mode']=='fixed_posts']
+    if fixed_posts:
+        fixed_directions={'from_start':'从区间起端向终端','from_end':'从区间终端向起端'}
+        def fixed_fraction(r):return r['numerator'] if r['denominator']=='1' else r['numerator']+' / '+r['denominator']
+        result.append(('定距立柱质量汇总',['材料表 / 材料项','来源S口径','单组根数','每根下料长（m）','每米质量（kg/m）','单组总长 / 质量','原始下料长及每米质量','规则与依据'],
+                       [[t['name']+' / '+v['name'],t['material_summary']['source_length_basis'],v['normalized_quantity'],v['single_member_length'],v['normalized_unit_weight'],v['single_group_stock_length']+' m / '+v['single_group_mass']+' kg',str(v['cut_length'])+' '+v['length_unit']+' / '+str(v['unit_weight'])+' '+v['weight_unit'],v['measurement_basis']+'；'+material_proofs(v)+'；'+v['post_layout']['notice']] for t,v in fixed_posts]))
+        result.append(('定距立柱锚向余跨与归属',['材料表 / 材料项 / 区间','原段起终S（m）','固定间距原值 / 标准m','定距锚向','常规跨数 / 余跨（m）','余跨所在端','两端归属 / 根数','说明及逐参数依据'],
+                       [[t['name']+' / '+v['name']+' / '+r['label'],r['s_from']+' → '+r['s_to'],str(r['spacing'])+' '+r['spacing_unit']+' / '+r['regular_spacing'],fixed_directions[r['direction']],str(r['regular_interval_count'])+' / '+r['residual_spacing'],{'none':'整除无余跨','start':'区间起端','end':'区间终端'}[r['residual_side']],('起端计' if r['start_post'] else '起端不计')+' / '+('终端计' if r['end_post'] else '终端不计')+' / '+str(r['post_count']),r['measurement_basis']+'；'+material_proofs(r)] for t,v in fixed_posts for r in v['post_layout']['post_ranges']]))
+        result.append(('定距立柱跨数精确校验',['材料表 / 材料项 / 区间','最小正整数N / 常规跨数','下界(N−1)²×间距²','未修约区间长度²','上界N²×间距²','严格关系及规则'],
+                       [[t['name']+' / '+v['name']+' / '+r['label'],str(r['interval_count'])+' / '+str(r['regular_interval_count']),fixed_fraction(r['ceil_certificate']['lower_spacing_square']),fixed_fraction(r['ceil_certificate']['range_length_square']),fixed_fraction(r['ceil_certificate']['upper_spacing_square']),'下界 < 区间长度² ≤ 上界；整除由精确上界相等判定；'+v['post_layout']['rule_version']] for t,v in fixed_posts for r in v['post_layout']['post_ranges']]))
+        result.append(('定距立柱逐根端距',['材料表 / 材料项','立柱编号','来源原段区间','定距锚向','原段起点端距S（m）','位置'],
+                       [[t['name']+' / '+v['name'],str(r['index']),r['range_label'],fixed_directions[r['direction']],r['s'],{'start':'区间起端','end':'区间终端','interior':'内部定距柱'}[r['position_kind']]] for t,v in fixed_posts for r in v['post_layout']['post_stations']]))
     def railing_edge_label(e):
         return 'S'+str(e['edge_index']) if e['role']=='route' else 'R'+str(e['ring_index'])+' E'+str(e['edge_index'])
     railings = [t for t in snapshot['takeoffs'] if t.get('railing_summary')]
