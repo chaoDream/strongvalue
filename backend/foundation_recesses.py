@@ -26,8 +26,8 @@ def validate_config(c):
         for k in Z_FIELDS:text(v['evidence'][k],'有限标高圆孔原始依据',200)
 
 
-def apply(d,gross,gross_ast,tiers,parameters,key,dimensions,refs,conversions):
-    c=d['through_holes'];validate_config(c);refs[key+'.holes.coordinate']=text(c['coordinate_evidence_id'],'基础孔位坐标原件',200)
+def apply(d,gross,gross_ast,tiers,parameters,key,dimensions,refs,conversions,profile=None):
+    c=d['through_holes'];(profile.validate_config if profile else validate_config)(c);refs[key+'.holes.coordinate']=text(c['coordinate_evidence_id'],'基础孔位坐标原件',200)
     circular=d.get('shape') in ('circular','stepped_circular')
     layers=tiers if tiers is not None else [dict(index=1,normalized_parameters=parameters,single_level_volume=str(gross),formula_asts=dict(single_level_volume=gross_ast))]
     zero={'constant':'0'};z=Decimal(0);z_ast=zero;bounds=[]
@@ -42,7 +42,7 @@ def apply(d,gross,gross_ast,tiers,parameters,key,dimensions,refs,conversions):
         def parameter(k,raw,positive=False):
             n=linear(raw,c['unit'],positive);dimensions[prefix+'.'+k]=str(raw);node=op('multiply',{'dimension':prefix+'.'+k},{'constant':LENGTH[c['unit']]})
             conversions.append(dict(parameter=prefix+'.'+k,original_value=str(raw),source_unit=c['unit'],factor=LENGTH[c['unit']],canonical_value=str(n),canonical_unit='m',rule_version=UNIT_VERSION));return n,node
-        for k in ('x','y','diameter'):values[k],asts[k]=parameter(k,h['parameters'][k],k=='diameter')
+        for k in (profile.fields(h) if profile else ('x','y','diameter')):values[k],asts[k]=parameter(k,h['parameters'][k],k not in ('x','y'))
         for k,eid in h['evidence'].items():refs[prefix+'.'+k]=text(eid,'基础逐孔原件',200)
         start,end=Decimal(0),z;start_ast,end_ast=zero,z_ast
         if 'vertical_range' in h:
@@ -56,7 +56,10 @@ def apply(d,gross,gross_ast,tiers,parameters,key,dimensions,refs,conversions):
             lo_ast=start_ast if start>=bottom else bottom_ast;hi_ast=end_ast if end<=top else top_ast;depth=hi-lo;depth_ast=op('subtract',hi_ast,lo_ast)
             p={k:Decimal(v) for k,v in layer['normalized_parameters'].items()}
             def dim(k):return op('multiply',{'dimension':lp+'.'+k},{'constant':LENGTH[d['length_unit']]})
-            if circular:
+            if profile:
+                margins,margin_asts=profile.containment(h,values,asts,p,dim,circular)
+                if any(Decimal(v)<0 for v in margins.values()):raise DomainError('基础孔“'+h['name']+'”越出实际相交第'+str(layer['index'])+'层轮廓')
+            elif circular:
                 margin=((p['diameter']-values['diameter'])/2)**2-values['x']**2-values['y']**2
                 if values['diameter']>=p['diameter'] or margin<0:raise DomainError('基础孔“'+h['name']+'”越出实际相交第'+str(layer['index'])+'层圆形轮廓或覆盖整层')
                 margins={'radial_squared':str(margin)};margin_asts={'radial_squared':op('subtract',square(op('divide',op('subtract',dim('diameter'),asts['diameter']),{'constant':'2'})),op('add',square(asts['x']),square(asts['y'])))}
@@ -66,16 +69,22 @@ def apply(d,gross,gross_ast,tiers,parameters,key,dimensions,refs,conversions):
                     margin=(p[side]-values['diameter'])/2-abs(values[axis])
                     if margin<0:raise DomainError('基础孔“'+h['name']+'”越出实际相交第'+str(layer['index'])+'层矩形轮廓')
                     margins[axis]=str(margin);center=asts[axis] if values[axis]>=0 else op('subtract',zero,asts[axis]);margin_asts[axis]=op('subtract',op('divide',op('subtract',dim(side),asts['diameter']),{'constant':'2'}),center)
-            node=op('multiply',op('divide',{'constant':PI},{'constant':'4'}),asts['diameter'],asts['diameter'],depth_ast);part=Decimal(PI)/4*values['diameter']*values['diameter']*depth
+            if not profile:node=op('multiply',op('divide',{'constant':PI},{'constant':'4'}),asts['diameter'],asts['diameter'],depth_ast);part=Decimal(PI)/4*values['diameter']*values['diameter']*depth
+            if profile:
+                cross,area_ast=profile.area(h,values,asts);node=op('multiply',area_ast,depth_ast);part=cross*depth
             layer_amounts[j]+=part;layer_nodes[j].append(node);hole_nodes.append(node);amount+=part
             containments.append(dict(level_index=layer['index'],margins=margins,state='tangent' if any(Decimal(v)==0 for v in margins.values()) else 'inside',formula_asts=margin_asts))
             segments.append(dict(level_index=layer['index'],z_start=str(lo),z_end=str(hi),height=str(depth),single_volume=str(part),formula_asts=dict(z_start=lo_ast,z_end=hi_ast,height=depth_ast,single_volume=node)))
         for previous in rows:
-            p=previous['normalized_parameters'];pn=previous['_asts'];distance=(values['x']-Decimal(p['x']))**2+(values['y']-Decimal(p['y']))**2;threshold=((values['diameter']+Decimal(p['diameter']))/2)**2
-            ps,pe=Decimal(previous['z_start']),Decimal(previous['z_end']);lo=max(start,ps);hi=min(end,pe);gap=lo-hi
-            if gap<0 and distance<threshold:raise DomainError('基础孔“'+previous['name']+'”与“'+h['name']+'”在正相交高度内重叠或相互包含，不能重复扣减')
-            gap_ast=op('subtract',start_ast if start>=ps else pn['z_start'],end_ast if end<=pe else pn['z_end']);margin_ast=op('subtract',op('add',square(op('subtract',asts['x'],pn['x'])),square(op('subtract',asts['y'],pn['y']))),square(op('divide',op('add',asts['diameter'],pn['diameter']),{'constant':'2'})))
-            checks.append(dict(left=previous['name'],right=h['name'],distance_squared=str(distance),radius_sum_squared=str(threshold),margin=str(distance-threshold),vertical_gap=str(gap),vertical_gap_ast=gap_ast,state='vertically_disjoint' if gap>0 else 'vertical_tangent' if gap==0 else 'tangent' if distance==threshold else 'disjoint',formula_ast=margin_ast))
+            pn=previous['_asts'];ps,pe=Decimal(previous['z_start']),Decimal(previous['z_end']);lo=max(start,ps);hi=min(end,pe);gap=lo-hi
+            if profile:details=profile.pair(h,values,asts,previous);margin=Decimal(details['margin'])
+            else:
+                p=previous['normalized_parameters'];distance=(values['x']-Decimal(p['x']))**2+(values['y']-Decimal(p['y']))**2;threshold=((values['diameter']+Decimal(p['diameter']))/2)**2;margin=distance-threshold
+                margin_ast=op('subtract',op('add',square(op('subtract',asts['x'],pn['x'])),square(op('subtract',asts['y'],pn['y']))),square(op('divide',op('add',asts['diameter'],pn['diameter']),{'constant':'2'})))
+                details=dict(distance_squared=str(distance),radius_sum_squared=str(threshold),margin=str(margin),formula_ast=margin_ast)
+            if gap<0 and margin<0:raise DomainError('基础孔“'+previous['name']+'”与“'+h['name']+'”在正相交高度内重叠或相互包含，不能重复扣减')
+            gap_ast=op('subtract',start_ast if start>=ps else pn['z_start'],end_ast if end<=pe else pn['z_end'])
+            checks.append(dict(left=previous['name'],right=h['name'],**details,vertical_gap=str(gap),vertical_gap_ast=gap_ast,state='vertically_disjoint' if gap>0 else 'vertical_tangent' if gap==0 else 'tangent' if margin==0 else 'disjoint'))
         node=op('add',*hole_nodes);nodes.append(node);deduction+=amount
         rows.append({**h,'index':index,'unit':c['unit'],'normalized_parameters':{k:str(v) for k,v in values.items()},'z_start':str(start),'z_end':str(end),'through_height':str(end-start),'single_volume':str(amount),'formula_ast':node,'height_ast':op('subtract',end_ast,start_ast),'vertical_formula_asts':dict(z_start=start_ast,z_end=end_ast),'segments':segments,'containments':containments,'_asts':{**asts,'z_start':start_ast,'z_end':end_ast}})
     for row in rows:row.pop('_asts')
