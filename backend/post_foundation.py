@@ -8,7 +8,7 @@ from .measurement_units import LENGTH,VERSION as UNIT_VERSION
 from .planar_takeoff import linear
 from .railing_material import calculate as material_quantity,validate as validate_material,snapshot
 from .surface_takeoff import check_sources
-from . import foundation_steps,foundation_round,foundation_openings,foundation_recesses,foundation_voids
+from . import foundation_steps,foundation_round,foundation_openings,foundation_recesses,foundation_voids,foundation_deduction_rules
 
 VERSION='railing-post-foundation-1.0'
 PARAMS=('length','width','height')
@@ -29,7 +29,7 @@ def eligible(r):return [v for v in r['material_items'] if 'post_layout' in v]
 def candidates(p,cid):
     s=source_component(p,cid);r=material_quantity(s);items=eligible(r)
     if not items:raise DomainError('该材料表没有已核定布置的立柱项，独立定长件不能推定为立柱')
-    from .foundation_voids import NOTICE as SHAPE_NOTICE
+    from .foundation_deduction_rules import NOTICE as SHAPE_NOTICE
     return dict(source_component_id=s['id'],source_component_hash=store.digest(snapshot(s)),source_name=s['name'],source_revision=s['revision'],multiplicity=r['material_summary']['multiplicity'],post_items=[dict(material_index=v['index'],material_name=v['name'],mode=v['mode'],post_count=v['post_layout']['post_count']) for v in items],notice=SHAPE_NOTICE)
 
 
@@ -67,7 +67,7 @@ def calculate(comp,source=None):
         text(d['measurement_basis'],'逐项基础适用范围说明');by_index[i]=original
     dimensions=dict(r['dimensions']);refs=dict(r['source_evidence']);conversions=list(r['unit_conversions'])
     for k in ('basis','material','rounding'):refs['foundation.'+k]=text(comp.get(k+'_evidence_id'),'基础总体原始依据',200)
-    rows=[];nodes=[];total=Decimal(0);outer_total=Decimal(0);opening_total=Decimal(0);group_posts=0;count=Decimal(r['material_summary']['multiplicity'])
+    rows=[];nodes=[];total=Decimal(0);outer_total=Decimal(0);opening_total=Decimal(0);geometric_opening_total=Decimal(0);group_posts=0;count=Decimal(r['material_summary']['multiplicity'])
     for i,d in sorted(by_index.items()):
         v=available[i];key='foundation.'+str(i);params={};asts={}
         tiers=None
@@ -83,11 +83,13 @@ def calculate(comp,source=None):
         original_single=single;opening_data={};opening_amount=Decimal(0)
         if 'through_holes' in d:single,shape_ast,opening_data,opening_amount=foundation_openings.apply(d,single,shape_ast,tiers,params,key,dimensions,refs,conversions)
         refs[key+'.measurement_basis']=text(d['evidence']['measurement_basis'],'基础逐项范围依据',200)
-        n=v['post_layout']['post_count'];group_posts+=n;subtotal=single*n;total+=subtotal;outer_total+=original_single*n;opening_total+=opening_amount*n
+        n=v['post_layout']['post_count'];group_posts+=n;subtotal=single*n;total+=subtotal;outer_total+=original_single*n;opening_total+=opening_amount*n;geometric_opening_total+=Decimal(opening_data.get('single_geometric_opening_volume',opening_amount))*n
         group_ast=op('multiply',shape_ast,v['post_layout']['formula_ast']);nodes.append(group_ast)
         rows.append({**d,**opening_data,'material_name':v['name'],'post_mode':v['mode'],'single_group_count':n,'total_count':str(Decimal(n)*count),**({'foundation_levels':tiers} if tiers is not None else {'normalized_parameters':params}),'single_foundation_volume':str(single),'single_group_volume':str(subtotal),'total_volume':str(subtotal*count),'formula_asts':dict(single_volume=shape_ast,single_group_count=v['post_layout']['formula_ast'],single_group_volume=group_ast,total_count=op('multiply',v['post_layout']['formula_ast'],{'dimension':'multiplicity'}),total_volume=op('multiply',group_ast,{'dimension':'multiplicity'}))})
         if opening_data:
             rows[-1].update(total_gross_volume=str(original_single*n*count),total_opening_volume=str(opening_amount*n*count))
+            for field in ('single_geometric_opening_volume','single_geometric_net_volume'):
+                if field in opening_data:rows[-1][field.replace('single_','total_')]=str(Decimal(opening_data[field])*n*count)
             for field,node in opening_data['opening_formula_asts'].items():
                 rows[-1]['formula_asts'][field]=node;rows[-1]['formula_asts'][field.replace('single_','total_')]=op('multiply',node,v['post_layout']['formula_ast'],{'dimension':'multiplicity'})
         if tiers is not None:
@@ -96,13 +98,17 @@ def calculate(comp,source=None):
                 if opening_data:
                     for field in ('single_level_volume','single_opening_volume'):
                         target='total_gross_volume' if field=='single_level_volume' else 'total_opening_volume';tier[target]=str(Decimal(tier[field])*n*count);tier['formula_asts'][target]=op('multiply',tier['formula_asts'][field],v['post_layout']['formula_ast'],{'dimension':'multiplicity'})
+                if 'geometric_opening_volume' in tier:
+                    for field in ('geometric_opening_volume','geometric_net_volume'):
+                        tier['total_'+field]=str(Decimal(tier[field])*n*count);tier['formula_asts']['total_'+field]=op('multiply',tier['formula_asts'][field],v['post_layout']['formula_ast'],{'dimension':'multiplicity'})
+    ruled=any('opening_deduction_rule' in row for row in rows)
     stepped_table=any('foundation_levels' in row for row in rows)
     round_table=any(row.get('shape') in foundation_round.SHAPES for row in rows)
     opened=any('through_holes' in row for row in rows)
     mixed_shapes=any(foundation_voids.enabled(row.get('through_holes')) for row in rows)
     finite=any(foundation_recesses.enabled(row.get('through_holes')) for row in rows)
     gross=quantity_number(total*count);quantity=quantity_number(gross.quantize(Decimal(1).scaleb(-digits),rounding=ROUND_HALF_UP))
-    return dict(quantity=str(quantity),gross=str(quantity_number(outer_total*count)) if opened else str(gross),deduction=str(quantity_number(opening_total*count)) if opened else '0',unit='m³',parameters={},formula=('Σ[(单基础毛体积−逐孔逐层有效相交孔洞体积)×来源最终单组立柱根数] × ' if mixed_shapes else 'Σ[(单基础毛体积−逐孔逐层有效相交圆孔体积)×来源最终单组立柱根数] × ' if finite else 'Σ[(单基础毛体积−全部互不重叠竖直贯通圆孔体积)×来源最终单组立柱根数] × ' if opened else 'Σ[单基础实体体积（圆柱π/4×实际直径²×净高，台阶逐层相加）×来源最终单组立柱根数] × ' if round_table else 'Σ[单基础逐层长×宽×层高之和×来源最终单组立柱根数] × ' if stepped_table else 'Σ[基础长×宽×高×来源最终单组立柱根数] × ')+str(count)+'；仅总体积修约'+str(digits)+'位',formula_ast={'op':'round','args':[op('multiply',op('add',*nodes),{'dimension':'multiplicity'})],'digits':digits,'mode':'HALF_UP'},dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,source_geometry=snapshot(s),source_component_id=s['id'],source_component_hash=comp['source_component_hash'],material=comp['material'],foundation_items=rows,foundation_summary=dict(source_name=s['name'],source_revision=s['revision'],selected_item_count=len(rows),unselected_post_item_count=len(available)-len(rows),single_group_count=group_posts,multiplicity=str(count),total_count=str(Decimal(group_posts)*count),single_group_volume=str(total),unrounded_quantity=str(gross),rounding_digits=digits,rounding_adjustment=str(quantity-gross)),rounding_rule='Decimal 80位；基础尺寸换算、单基础及分项体积不修约，累计乘来源重复一次后，仅总体积按HALF_UP修约；数量直接引用已审立柱布置公式',rule_version=foundation_voids.VERSION if mixed_shapes else foundation_recesses.VERSION if finite else foundation_openings.VERSION if opened else foundation_round.VERSION if round_table else foundation_steps.VERSION if stepped_table else VERSION,notice=foundation_voids.NOTICE if mixed_shapes else foundation_recesses.NOTICE if finite else foundation_openings.NOTICE if opened else foundation_round.NOTICE if round_table else foundation_steps.NOTICE if stepped_table else NOTICE,**({'foundation_pi_constant':foundation_round.PI} if round_table or opened and (not mixed_shapes or any(not foundation_voids.rectangular(h) for row in rows for h in row.get('opening_holes',[]))) else {}),**({'foundation_opening_summary':dict(gross_volume=str(outer_total*count),opening_volume=str(opening_total*count),net_volume=str(gross),selected_hole_count=sum(len(row.get('opening_holes',[])) for row in rows),total_hole_count=str(sum((Decimal(len(row.get('opening_holes',[])))*row['single_group_count']*count for row in rows),Decimal(0))))} if opened else {}))
+    return dict(quantity=str(quantity),gross=str(quantity_number(outer_total*count)) if opened else str(gross),deduction=str(quantity_number(opening_total*count)) if opened else '0',unit='m³',parameters={},formula=('Σ[(单基础毛体积−按核定单孔阈值计量扣减)×来源最终单组立柱根数] × ' if ruled else 'Σ[(单基础毛体积−逐孔逐层有效相交孔洞体积)×来源最终单组立柱根数] × ' if mixed_shapes else 'Σ[(单基础毛体积−逐孔逐层有效相交圆孔体积)×来源最终单组立柱根数] × ' if finite else 'Σ[(单基础毛体积−全部互不重叠竖直贯通圆孔体积)×来源最终单组立柱根数] × ' if opened else 'Σ[单基础实体体积（圆柱π/4×实际直径²×净高，台阶逐层相加）×来源最终单组立柱根数] × ' if round_table else 'Σ[单基础逐层长×宽×层高之和×来源最终单组立柱根数] × ' if stepped_table else 'Σ[基础长×宽×高×来源最终单组立柱根数] × ')+str(count)+'；仅总体积修约'+str(digits)+'位',formula_ast={'op':'round','args':[op('multiply',op('add',*nodes),{'dimension':'multiplicity'})],'digits':digits,'mode':'HALF_UP'},dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,source_geometry=snapshot(s),source_component_id=s['id'],source_component_hash=comp['source_component_hash'],material=comp['material'],foundation_items=rows,foundation_summary=dict(source_name=s['name'],source_revision=s['revision'],selected_item_count=len(rows),unselected_post_item_count=len(available)-len(rows),single_group_count=group_posts,multiplicity=str(count),total_count=str(Decimal(group_posts)*count),single_group_volume=str(total),unrounded_quantity=str(gross),rounding_digits=digits,rounding_adjustment=str(quantity-gross)),rounding_rule='Decimal 80位；基础尺寸换算、单基础及分项体积不修约，累计乘来源重复一次后，仅总体积按HALF_UP修约；数量直接引用已审立柱布置公式',rule_version=foundation_deduction_rules.VERSION if ruled else foundation_voids.VERSION if mixed_shapes else foundation_recesses.VERSION if finite else foundation_openings.VERSION if opened else foundation_round.VERSION if round_table else foundation_steps.VERSION if stepped_table else VERSION,notice=foundation_deduction_rules.NOTICE if ruled else foundation_voids.NOTICE if mixed_shapes else foundation_recesses.NOTICE if finite else foundation_openings.NOTICE if opened else foundation_round.NOTICE if round_table else foundation_steps.NOTICE if stepped_table else NOTICE,**({'foundation_pi_constant':foundation_round.PI} if round_table or opened and (not mixed_shapes or any(not foundation_voids.rectangular(h) for row in rows for h in row.get('opening_holes',[]))) else {}),**({'foundation_opening_summary':dict(**(dict(geometric_opening_volume=str(geometric_opening_total*count),geometric_net_volume=str((outer_total-geometric_opening_total)*count)) if ruled else {}),gross_volume=str(outer_total*count),opening_volume=str(opening_total*count),net_volume=str(gross),selected_hole_count=sum(len(row.get('opening_holes',[])) for row in rows),total_hole_count=str(sum((Decimal(len(row.get('opening_holes',[])))*row['single_group_count']*count for row in rows),Decimal(0))))} if opened else {}))
 
 
 def validate(p,comp,saved=False):

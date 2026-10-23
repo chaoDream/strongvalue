@@ -11,7 +11,8 @@ FIELDS=('x','y','diameter')
 
 
 def validate_config(c):
-    from . import foundation_recesses,foundation_voids
+    from . import foundation_recesses,foundation_voids,foundation_deduction_rules
+    if foundation_deduction_rules.enabled(c):return foundation_deduction_rules.validate_config(c)
     if foundation_voids.enabled(c):return foundation_voids.validate_config(c)
     if foundation_recesses.enabled(c):return foundation_recesses.validate_config(c)
     if not isinstance(c,dict) or set(c)!={'unit','coordinate_basis','coordinate_evidence_id','scope_confirmed','holes'}:raise DomainError('基础贯通孔须明确局部XY单位、共同中心坐标依据、贯通范围确认及孔表')
@@ -28,7 +29,8 @@ def validate_config(c):
 
 
 def apply(d,gross,gross_ast,tiers,parameters,key,dimensions,refs,conversions):
-    from . import foundation_recesses,foundation_voids
+    from . import foundation_recesses,foundation_voids,foundation_deduction_rules
+    if foundation_deduction_rules.enabled(d['through_holes']):return foundation_deduction_rules.apply(d,gross,gross_ast,tiers,parameters,key,dimensions,refs,conversions)
     if foundation_voids.enabled(d['through_holes']):return foundation_recesses.apply(d,gross,gross_ast,tiers,parameters,key,dimensions,refs,conversions,profile=foundation_voids)
     if foundation_recesses.enabled(d['through_holes']):return foundation_recesses.apply(d,gross,gross_ast,tiers,parameters,key,dimensions,refs,conversions)
     c=d['through_holes'];validate_config(c);refs[key+'.holes.coordinate']=text(c['coordinate_evidence_id'],'基础孔位坐标原件',200)
