@@ -112,8 +112,12 @@ def candidates(p, cid):
     result = boundary(source)
     notice=source_notice(source)
     if source['kind']=='polygon_region':
-        from .polygon_side_partitions import NOTICE as notice
-    return {**result, 'base_faces': result['faces'], 'source_component_id': source['id'], 'source_component_hash': store.digest(snapshot(source)),
+        from .polygon_cap_partitions import NOTICE as notice
+    base_faces=result['faces']
+    if source['kind']=='polygon_region':
+        from .polygon_cap_partitions import editor_faces
+        base_faces=editor_faces(base_faces)
+    return {**result, 'base_faces': base_faces, 'source_component_id': source['id'], 'source_component_hash': store.digest(snapshot(source)),
             'source_name': source['name'], 'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': notice}
 
 
@@ -125,7 +129,7 @@ def partition(source, subdivisions):
     if not subdivisions:
         return result
     if source['kind'] == 'polygon_region':
-        from .polygon_side_partitions import partition as partition_sides
+        from .polygon_cap_partitions import partition as partition_sides
         return partition_sides(source, subdivisions, result)
     originals = {f['face_id']: f for f in result['faces']}
     by_id, records, faces = {}, [], []
@@ -200,8 +204,12 @@ def partition_candidates(p, body):
     check_sources(p, result['source_evidence'])
     notice=source_notice(source)
     if source['kind']=='polygon_region':
-        from .polygon_side_partitions import NOTICE as notice
-    return {**result, 'base_faces': boundary(source)['faces'], 'source_component_id': source['id'],
+        from .polygon_cap_partitions import NOTICE as notice
+    base_faces=boundary(source)['faces']
+    if source['kind']=='polygon_region':
+        from .polygon_cap_partitions import editor_faces
+        base_faces=editor_faces(base_faces)
+    return {**result, 'base_faces': base_faces, 'source_component_id': source['id'],
             'source_component_hash': body['source_component_hash'], 'source_name': source['name'],
             'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': notice}
 
@@ -261,6 +269,9 @@ def calculate(comp, source=None):
             from .polygon_side_partitions import VERSION as partition_version, ROUNDING as partition_rounding, NOTICE as partition_notice
             output.update(surface_partition_checks=result['surface_partition_checks'], rule_version=partition_version,
                           rounding_rule=partition_rounding, notice=partition_notice)
+        if result.get('surface_cap_partition_checks'):
+            from .polygon_cap_partitions import VERSION as cap_version, ROUNDING as cap_rounding, NOTICE as cap_notice
+            output.update(surface_cap_partition_checks=result['surface_cap_partition_checks'], rule_version=cap_version, rounding_rule=cap_rounding, notice=cap_notice)
     return output
 
 

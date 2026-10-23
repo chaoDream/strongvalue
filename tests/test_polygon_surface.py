@@ -108,11 +108,11 @@ def test_large_origin_tiny_geometry_and_source_count_applied_once():
         r=calculate(surface(s,included=lambda f:True),s);assert Decimal(r['quantity'])==expected*7
 
 
-def test_area_mode_and_nonempty_polygon_subdivisions_rejected():
+def test_area_mode_and_empty_polygon_partition_config_rejected():
     s=geometry();s['quantity_type']='area'
     with pytest.raises(DomainError):boundary(s)
     s=geometry();assert partition(s,[])==boundary(s)
-    with pytest.raises(DomainError,match='局部分区'):partition(s,[{'face_id':boundary(s)['faces'][0]['face_id'],'u_cuts':[],'v_cuts':[]}])
+    with pytest.raises(DomainError,match='至少需要一条'):partition(s,[{'face_id':boundary(s)['faces'][0]['face_id'],'u_cuts':[],'v_cuts':[]}])
 
 
 def test_candidate_preview_review_calculate_boq_and_client_snapshot_ignored(clients):

@@ -124,14 +124,13 @@ def test_irrational_edge_precision_is_audited_without_adjusting_children():
         assert sum(((Decimal(c['u_to'])-Decimal(c['u_from']))*(Decimal(c['v_to'])-Decimal(c['v_from'])) for c in children),Decimal(0))==Decimal(f['edge_length'])*Decimal(f['height'])
 
 
-@pytest.mark.parametrize('case',['null','not_list','fields','unknown','cap','duplicate_face','empty','too_many','outside_s','outside_z','negative','zero','end','duplicate_coordinate','unit','nan','precision','proof','extra_cut_field','cuts_not_list'])
-def test_invalid_local_ranges_and_unsupported_caps_rejected(case):
+@pytest.mark.parametrize('case',['null','not_list','fields','unknown','duplicate_face','empty','too_many','outside_s','outside_z','negative','zero','end','duplicate_coordinate','unit','nan','precision','proof','extra_cut_field','cuts_not_list'])
+def test_invalid_local_ranges_rejected(case):
     s=geometry();groups=cuts(s);g=groups[0];c=g['u_cuts'][0]
     if case=='null':groups=None
     elif case=='not_list':groups={}
     elif case=='fields':g['plane']='invented'
     elif case=='unknown':g['face_id']='unknown'
-    elif case=='cap':g['face_id']=boundary(s)['faces'][0]['face_id']
     elif case=='duplicate_face':groups.append(copy.deepcopy(g))
     elif case=='empty':g['u_cuts']=[];g['v_cuts']=[]
     elif case=='too_many':g['u_cuts']*=9

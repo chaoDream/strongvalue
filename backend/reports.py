@@ -423,6 +423,15 @@ def tables(p, q, approved):
                         for t in snapshot['takeoffs'] for c in t.get('surface_partition_checks', [])]
     if partition_checks:
         result.append(('多边形侧面分区校验', ['构件', '原面 / 子面数', '原面积（m²）', '子面合计（m²）', '精度差（m²）', '校验说明'], partition_checks))
+    cap_checks = [[t['name'], '原F'+str(c['parent_index']), str(c['child_count'])+'净区 / '+str(c['zero_window_count'])+'零窗口',
+                   c['parent_area'], c['children_area'], c['area_difference'], '精确有理数裁剪与扣孔面积完整闭合；零净量窗口不生成面，80位面积不调平']
+                  for t in snapshot['takeoffs'] for c in t.get('surface_cap_partition_checks', [])]
+    if cap_checks:
+        result.append(('净面窗口分区校验', ['构件','原面','计量/零窗口','原面积（m²）','子区合计（m²）','精度差（m²）','校验说明'], cap_checks))
+        result.append(('净面窗口逐孔扣减', ['构件 / 净区','共同XY窗口 / 局部Z','原轮廓','窗口内面积（m²）','净区面积（m²）','算法'],
+                       [[t['name']+' / F'+str(f['index']), f['position'], 'R'+str(c['ring_index'])+(' 外轮廓' if c['role']=='outer' else ' 孔'),
+                         c['area'], f['area'], f['cap_clip_rule']]
+                        for t in snapshot['takeoffs'] for f in t.get('surface_faces',[]) if f.get('cap_clip_rule') for c in f['cap_clip_rings']]))
     if not q:
         from .main import blockers
         next(table[2] for table in result if table[0] == '缺项与警示').extend([[x] for x in blockers(p)])

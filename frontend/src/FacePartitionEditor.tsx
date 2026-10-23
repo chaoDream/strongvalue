@@ -6,11 +6,12 @@ export default function FacePartitionEditor({faces,groups,onChange,onApply,busy,
   const [selected,setSelected]=useState('');
   const face=faces.find(f=>f.face_id===selected)||faces[0];
   if(!face)return null;
+  const edge=localEdge&&face.geometry_type==='polygon_side',cap=localEdge&&face.geometry_type==='polygon_cap';
   const group=groups.find(g=>g.face_id===face.face_id)||{face_id:face.face_id,u_cuts:[],v_cuts:[]};
   function update(axis:string,cuts:Obj[]){const next={...group,[axis+'_cuts']:cuts},others=groups.filter(g=>g.face_id!==face.face_id);
     onChange(next.u_cuts.length||next.v_cuts.length?[...others,next]:others);}
   return <details className="compound-part"><summary>局部分区设置（{groups.length}个原始面）</summary>
-    <p className="form-note">{localEdge?'只对外侧或孔内侧原边展开面分区。S为从原边起点沿P起→P终方向的距离，Z为从局部底面0起的高度；不能填写共同XY或绝对标高。上下扣孔净面不能分区。':'分割线填写面内对应轴的共同设计坐标值，不能填像素或距面边的相对距离。'}每轴最多8条，坐标严格位于原始面内；应用后新子面须重新核定，未变分面保留决定。</p>
+    <p className="form-note">{edge?'本侧面用局部S/Z：S从原边起点沿P起→P终方向量取，Z从局部底面0起算，不能填共同XY或绝对标高。':cap?'本上下净面用共同设计X/Y坐标。窗口只核定其中扣孔后的净区，凹形可能分成多块，空白或孔内零净量窗口不生成面；不能把矩形窗口面积当作工程量。':'分割线填写面内对应轴的共同设计坐标值，不能填像素或距面边的相对距离。'}每轴最多8条，坐标严格位于原始面内；应用后新子面须重新核定，未变分面保留决定。</p>
     <label className="field"><span>选择要分区的原始面</span><select aria-label="选择要分区的原始面" value={face.face_id} onChange={e=>setSelected(e.target.value)}>{faces.map(f=><option key={f.face_id} value={f.face_id}>原F{f.index} · {localEdge?f.label:`${f.normal}=${f.plane}m`} · {f.u_axis} {f.u_from}至{f.u_to}m / {f.v_axis} {f.v_from}至{f.v_to}m</option>)}</select></label>
     {['u','v'].map(axis=><fieldset className="compound-part" key={axis}><legend>沿{face[axis+'_axis'].toUpperCase()}坐标分割 · 范围{face[axis+'_from']}至{face[axis+'_to']}m</legend>
       {group[axis+'_cuts'].map((cut:Obj,i:number)=><div className="compound-part" key={i}><div className="form-grid">

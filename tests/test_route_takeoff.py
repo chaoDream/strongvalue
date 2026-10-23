@@ -36,6 +36,7 @@ def evaluate(node, dimensions):
     if 'dimension' in node:return Decimal(dimensions[node['dimension']])
     if 'constant' in node:return Decimal(node['constant'])
     values=[evaluate(a,dimensions) for a in node['args']]
+    if node['op']=='divide':return values[0]/values[1]
     if node['op']=='sqrt':return values[0].sqrt()
     if node['op']=='round':return values[0].quantize(Decimal(1).scaleb(-node['digits']),rounding=ROUND_HALF_UP)
     if node['op']=='add':return sum(values,Decimal(0))
