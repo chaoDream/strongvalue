@@ -20,7 +20,7 @@ from .compound_takeoff import component_quantity, structured_validator, STRUCTUR
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.47.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.48.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -91,7 +91,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes', 'supplier_quote_adoptions']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes', 'supplier_quote_adoptions', 'supplier_inquiry_reopenings']:
         p.setdefault(key, [])
     return p
 
@@ -1061,11 +1061,9 @@ def apply_review(c, p, body, a, hash_verified=False):
         elif collection in ('takeoffs', 'boq') and all(x['state'] == 'approved' for x in p[collection]):
             p['status'] = 'TAKEOFF_APPROVED' if collection == 'takeoffs' else 'BOQ_APPROVED'
     if collection == 'supplier_quotes' and not approve:
-        ids={x['boq_id'] for x in p['supplier_quote_adoptions'] if x['quote_id']==target['id']}
-        if ids:
-            for b in p['boq']:
-                if b['id'] in ids and any(r.get('supplier_quote_ref',{}).get('quote_id')==target['id'] for q in b['quotas'] for r in q['resources']):
-                    b['state']='stale'
+        affected=[b for b in p['boq'] if any(r.get('supplier_quote_ref',{}).get('quote_id')==target['id'] for q in b['quotas'] for r in q['resources'])]
+        if affected:
+            for b in affected:b['state']='stale'
             invalidate(p,'quotes')
     if collection == 'engineering_structures':
         invalidate(p, 'quotes')
@@ -1153,6 +1151,7 @@ def quote(pid: str, a=Depends(actor)):
         snapshot['drawing_references']=p['drawing_references']
         snapshot['supplier_quotes']=p['supplier_quotes']
         snapshot['supplier_quote_adoptions']=p['supplier_quote_adoptions']
+        snapshot['supplier_inquiry_reopenings']=p['supplier_inquiry_reopenings']
         from .scoped_rules import validate as validate_scoped
         validate_scoped(p, ruleset)
         result = calculate(p['boq'], ruleset, current_structure(p))
@@ -1193,7 +1192,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.47.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.48.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 def persist_export(c, p, a, format='pdf', quote_id='', template_id='', unpriced=False):

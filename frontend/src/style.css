@@ -2774,3 +2774,6 @@ input::placeholder,textarea::placeholder {
 .report-reader-nav .field { flex:1; min-width:200px; margin:0; }
 .report-reader>.pdf-app { border-top:1px solid #e5ecdd; }
 .report-reader .pdf-canvas-scroll { max-height:720px; }
+
+.supplier-inquiry-history { margin:16px 20px; overflow-wrap:anywhere; }
+.supplier-inquiry-history article { padding:12px 0; border-bottom:1px solid #edf0eb; }

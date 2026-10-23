@@ -144,6 +144,17 @@ def tables(p, q, approved):
               o['terms']+' / '+o['reason'],{'draft':'待复核','approved':'已审定','rejected':'已拒绝','needs_info':'待补件'}.get(o['state'],o['state'])+' / '+o['evidence_id']]
              for o in offers]))
     adoptions=snapshot.get('supplier_quote_adoptions',[])
+    revisions=[o for o in offers if o.get('previous_quote_id')]
+    if revisions:
+        result.append(('供应商报价修订',['供应商 / 资源','报价版本 / 原版本','原单价 / 新单价','修订核对依据','登记人 / 时间','原始证据'],
+            [[o['supplier']+' / '+o['target']['resource']['name'],'R'+str(o['revision'])+' / '+o['previous_quote_id'],
+              next((p['metadata']['price'] for p in offers if p['id']==o['previous_quote_id']),'历史原价')+' → '+o['metadata']['price']+'元/'+o['target']['resource']['unit']+' / 不作为价差',
+              o['reason'],o['author']+' / '+o['created_at'],o['evidence_id']] for o in revisions]))
+    reopenings=snapshot.get('supplier_inquiry_reopenings',[])
+    if reopenings:
+        result.append(('供应商重新询价',['资源 / 清单','原报价 / 采用记录','原价 / 当前操作','重新询价依据','操作人 / 时间','原始证据'],
+            [[x['before']['name']+' / '+x['boq_name'],x['quote_id']+' / '+x['adoption_id'],x['before']['price']+'元/'+x['before']['unit']+' → 待询价（不是零价）',
+              x['reason'],x['author']+' / '+x['created_at'],x['evidence_id']] for x in reopenings]))
     if adoptions:
         result.append(('供应商报价采用',['资源 / 清单','报价及版本校验','采用单价 / 原状态','选择依据','采用人 / 时间','原始证据'],
             [[x['after']['name']+' / '+next((b['name'] for b in snapshot['boq'] if b['id']==x['boq_id']),x['boq_id']),
