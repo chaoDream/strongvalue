@@ -1,4 +1,4 @@
-"""Explicit internal-post moves and closed no-post ranges on a fixed layout."""
+"""Explicit internal-post moves and closed no-post ranges on a regular layout."""
 from copy import deepcopy
 from decimal import Decimal
 from fractions import Fraction
@@ -9,8 +9,10 @@ from .planar_takeoff import linear
 from .railing_posts import calculate as original_layout
 
 VERSION='railing-fixed-adjusted-posts-1.0'
+EQUAL_VERSION='railing-equal-adjusted-posts-1.0'
 NOTICE='按已审固定间距及两端归属建立原布置，再按原件内部节点号j逐根移柱，数量及规格不变，不自动删柱、加柱或重新均分。j按原布置S递增编号，不是全部材料表柱号；S从来源原段起点按已审三维或水平口径增加。禁布范围为含两端的闭区间，移后全部计入柱须在禁布范围之外；内部柱不得移到区间端部、与其他柱重合或交叉换序，端柱只能通过原两端归属核定。原定距跨数及余跨仅描述调整前布置，移后实际柱距、构造合规、跨边交叉、基础及施工定位须另核，不自动寻找避让位置。'
 
+EQUAL_NOTICE='按已审最大间距、均分跨间及两端归属建立原布置，再按原件原内部均分节点号j逐根移柱，原节点位置及公式保留，数量及规格不变，不自动删柱、加柱或重新均分。j按原布置S递增编号，不是材料表总柱号；新S从来源原段起点按已审三维或水平口径增加。禁布范围为含两端的闭区间，移后全部计入柱必须在其外；内部柱不得移到区间端部、与其他柱重合或交叉换序，端柱仍通过原两端归属核定。原跨数、最大间距及均分跨间距描述移前布置，不能据此认定移后实际柱距合规，移后专业构造、跨边交叉、基础及施工定位须另核，不自动寻找避让位置。'
 
 def compare(a,b,square):
     """Exact sign of (a0+a1*sqrt(square)) - (b0+b1*sqrt(square))."""
@@ -22,10 +24,13 @@ def compare(a,b,square):
     return ((z>0)-(z<0))*((x>0)-(x<0))
 
 
-def coordinate(row,p):
+def coordinate(row,p,equal=False):
     a,b=Fraction(row['s_from']),Fraction(row['s_to']);n=p['bay_index'];step=Fraction(row['normalized_spacing'])
     if p['position_kind']=='start':return a,Fraction(0)
     if p['position_kind']=='end':return (Fraction(0),Fraction(1)) if row['full'] else (b,Fraction(0))
+    if equal:
+        ratio=Fraction(n,row['interval_count'])
+        return (Fraction(0),ratio) if row['full'] else (a+(b-a)*ratio,Fraction(0))
     if row['direction']=='from_start':return a+n*step,Fraction(0)
     offset=(row['interval_count']-n)*step
     return (-offset,Fraction(1)) if row['full'] else (b-offset,Fraction(0))
@@ -33,7 +38,8 @@ def coordinate(row,p):
 
 @precise
 def calculate(item,result,prefix):
-    base=deepcopy(item);base['mode']='fixed_posts';plans=base.get('post_ranges')
+    equal=item['mode']=='spaced_adjusted_posts'
+    base=deepcopy(item);base['mode']='spaced_posts' if equal else 'fixed_posts';plans=base.get('post_ranges')
     if not isinstance(plans,list):raise DomainError('避让移柱须明确逐区间布置')
     controls={}
     for plan in plans:
@@ -45,7 +51,7 @@ def calculate(item,result,prefix):
     for row in g['post_ranges']:
         key=prefix+str(row['index']);avoided,moves=controls[row['range_id']];edge=edges[row['edge_id']];sq=edge['squared_length'];square=Fraction(int(sq['numerator']),int(sq['denominator']))
         a=Fraction(row['s_from']);end=(Fraction(0),Fraction(1)) if row['full'] else (Fraction(row['s_to']),Fraction(0))
-        points=[p for p in g['post_stations'] if p['range_id']==row['range_id']];original={p['bay_index']:coordinate(row,p) for p in points};positions=dict(original)
+        points=[p for p in g['post_stations'] if p['range_id']==row['range_id']];original={p['bay_index']:coordinate(row,p,equal) for p in points};positions=dict(original)
         for p in points:p.update(original_s=p['s'],original_station_formula_ast=deepcopy(p['station_formula_ast']),moved=False)
         row['avoidance_ranges']=[];row['post_moves']=[];labels=set();intervals=set()
         for j,avoid in enumerate(avoided,1):
@@ -84,5 +90,5 @@ def calculate(item,result,prefix):
             low,high=Fraction(avoid['normalized_from']),Fraction(avoid['normalized_to'])
             if any(compare(p,(low,Fraction(0)),square)>=0 and compare(p,(high,Fraction(0)),square)<=0 for p in ordered):raise DomainError('移后仍有计入柱落在禁布闭区间（含边界），请核对移柱或端部归属')
         forbidden+=len(avoided);row['moved_post_count']=len(moves)
-    if not changed and not forbidden:raise DomainError('避让移柱模式须至少明确一个禁布范围或一根移柱，无调整请用原定距模式')
-    return {**g,'moved_post_count':changed,'avoidance_range_count':forbidden,'rule_version':VERSION,'notice':NOTICE}
+    if not changed and not forbidden:raise DomainError('避让移柱模式须至少明确一个禁布范围或一根移柱，无调整请用原布置模式')
+    return {**g,'moved_post_count':changed,'avoidance_range_count':forbidden,'rule_version':EQUAL_VERSION if equal else VERSION,'notice':EQUAL_NOTICE if equal else NOTICE}
