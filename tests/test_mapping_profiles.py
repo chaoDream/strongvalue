@@ -48,7 +48,11 @@ def design_project(clients, kind='chamber_plate', profile='cover'):
         module = importlib.import_module('tests.test_'+{'surface_faces': 'surface_takeoff', 'station_trench': 'trench_takeoff',
              'volume_balance': 'volume_balance', 'pipe_envelope': 'pipe_envelope', 'route_bedding': 'bedding_takeoff',
              'circular_chamber': 'chamber_takeoff', 'chamber_plate': 'plate_openings', 'polygon_railing': 'railing_takeoff'}[kind])
-        values = module.setup(clients); e, r, pid = values[:3]; b = values[-2]
+        if kind=='polygon_railing' and profile!='length':
+            from tests.test_route_railing import setup as route_railing_setup
+            values=route_railing_setup(clients,basis='spatial' if profile=='spatial_length' else 'horizontal')
+        else:values=module.setup(clients)
+        e, r, pid = values[:3]; b = values[-2]
         if kind in ('surface_faces', 'circular_chamber'): b['purpose'] = profile
         if kind == 'chamber_plate': b['plate_role'] = profile
     base = '/api/v1/projects/'+pid
@@ -86,7 +90,7 @@ def test_catalog_keeps_primitive_forms_separate_and_covers_all_kinds(clients):
     types = e.get('/api/v1/boq-mapping-types').json()
     assert set(types) == set(GEOMETRIES) | set(STRUCTURED_KINDS)
     assert e.get('/api/v1/takeoff-types').json() == GEOMETRIES
-    assert sum(len(v['profiles']) for v in types.values()) == 30
+    assert sum(len(v['profiles']) for v in types.values()) == 32
     for kind, v in types.items():
         for p in v['profiles']: assert selected_profile({'kind': kind, 'measurement_profile': p['id'], 'unit': p['unit']}) == p
 
@@ -108,7 +112,7 @@ def test_each_structured_profile_review_preview_apply_and_export(clients, kind, 
     assert next(p['label'] for p in TYPES[kind]['profiles'] if p['id'] == profile) in table[2][0][2]
 
 
-@pytest.mark.parametrize('kind,first,other', [('circular_chamber', 'wall_material', 'outer_envelope'), ('chamber_plate', 'base', 'cover'), ('surface_faces', 'formwork', 'waterproof')])
+@pytest.mark.parametrize('kind,first,other', [('circular_chamber', 'wall_material', 'outer_envelope'), ('chamber_plate', 'base', 'cover'), ('surface_faces', 'formwork', 'waterproof'), ('polygon_railing','spatial_length','horizontal_projection'), ('polygon_railing','length','spatial_length')])
 def test_same_unit_different_purpose_never_matches(clients, kind, first, other):
     e, r, pid, cid, b, body = design_project(clients, kind, first); base = '/api/v1/projects/'+pid
     wrong = save_rule(e, r, pid, {**body, 'measurement_profile': other})

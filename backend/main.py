@@ -21,7 +21,7 @@ from .compound_takeoff import component_quantity, structured_validator, STRUCTUR
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.65.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.66.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -595,6 +595,7 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
             fields = ['name', 'kind', 'parameters', 'measurement_basis', 'basis_evidence_id']
             if body['kind'] == 'polygon_railing':
                 fields += ['quantity_type','source_component_id','source_component_hash','edge_decisions','scope_confirmed','material','material_evidence_id','installation_basis','installation_evidence_id','rounding_digits','rounding_evidence_id']
+                if 'length_basis' in body:fields += ['length_basis','length_basis_evidence_id']
             elif body['kind'] == 'chamber_plate':
                 fields += ['quantity_type','plate_role','source_component_id','source_component_hash','plate_sections','scope_confirmed','material','material_evidence_id','construction_basis','construction_evidence_id','rounding_digits','rounding_evidence_id']
                 if 'opening_mode' in body: fields += ['opening_mode']
@@ -654,10 +655,10 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
 
 
 @app.get('/api/v1/projects/{pid}/railing-edge-candidates')
-def railing_edge_candidates(pid: str, component_id: str, a=Depends(actor)):
+def railing_edge_candidates(pid: str, component_id: str, length_basis: str | None = None, a=Depends(actor)):
     from .railing_takeoff import candidates
     with store.connect() as c:
-        return candidates(project(c, pid, a), component_id)
+        return candidates(project(c, pid, a), component_id, length_basis)
 
 
 @app.get('/api/v1/projects/{pid}/chamber-plate-candidates')

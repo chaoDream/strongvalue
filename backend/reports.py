@@ -386,6 +386,8 @@ def tables(p, q, approved):
                          for t in spatial for i in t['spatial_intersections']]
         if intersections:
             result.append(('空间相交定位', ['构件', '加扣', '长方体A', '长方体B', '两两相交体积（m³）', '说明'], intersections))
+    def railing_edge_label(e):
+        return 'S'+str(e['edge_index']) if e['role']=='route' else 'R'+str(e['ring_index'])+' E'+str(e['edge_index'])
     railings = [t for t in snapshot['takeoffs'] if t.get('railing_summary')]
     if railings:
         labels={'available_length':'候选原边总长（m）','single_length':'单组核定长度（m）','multiplicity':'来源重复数量','unrounded_quantity':'修约前总长（m）','rounding_digits':'总长修约位数','rounding_adjustment':'修约差额（m）'}
@@ -393,11 +395,18 @@ def tables(p, q, approved):
                        [[t['name'],label,str(t['railing_summary'][key])] for t in railings for key,label in labels.items()]+
                        [[t['name'],key,value] for t in railings for key,value in [('来源',t['railing_summary']['source_name']+' / V'+str(t['railing_summary']['source_revision'])),('工程量',t['quantity']+' m'),('材料做法',t['material']),('安装依据',t['installation_basis']),('计量依据',t['measurement_basis']),('算法及精度',t['rule_version']+'；'+t['rounding_rule']),('适用边界',t['notice'])]]))
         result.append(('栏杆逐边范围核定',['栏杆 / 原边','轮廓及原点序','起终XY（m）','原边长（m）','决定 / 计入长（m）','计量说明','原始依据'],
-                       [[t['name']+' / R'+str(e['ring_index'])+' E'+str(e['edge_index']),('外轮廓' if e['role']=='outer' else '孔')+' / P'+str(e['from_index'])+'→P'+str(e['to_index']),json.dumps(e['from_xy'])+' → '+json.dumps(e['to_xy']),e['length'],{'exclude':'排除','full':'整边','ranges':'局部区间'}[e['mode']]+' / '+e['selected_length'],e['basis'],e['evidence_id']] for t in railings for e in t['railing_edges']]))
-        ranges=[[t['name']+' / R'+str(e['ring_index'])+' E'+str(e['edge_index']),v['from']+' → '+v['to']+' '+v['unit'],v['s_from']+' → '+v['s_to'],v['length'],v['from_evidence_id']+' / '+v['to_evidence_id']] for t in railings for e in t['railing_edges'] for v in e['normalized_ranges']]
+                       [[t['name']+' / '+railing_edge_label(e),('设计线段' if e['role']=='route' else '外轮廓' if e['role']=='outer' else '孔')+' / P'+str(e['from_index'])+'→P'+str(e['to_index']),json.dumps(e['from_xy'])+' → '+json.dumps(e['to_xy']),e['length'],{'exclude':'排除','full':'整边','ranges':'局部区间'}[e['mode']]+' / '+e['selected_length'],e['basis'],e['evidence_id']] for t in railings for e in t['railing_edges']]))
+        ranges=[[t['name']+' / '+railing_edge_label(e),str(v['from'])+' → '+str(v['to'])+' '+v['unit'],v['s_from']+' → '+v['s_to'],v['length'],v['from_evidence_id']+' / '+v['to_evidence_id']] for t in railings for e in t['railing_edges'] for v in e['normalized_ranges']]
         if ranges:result.append(('栏杆局部计长区间',['栏杆 / 原边','原始起终距','标准S区间（m）','长度（m）','起终距依据'],ranges))
-        result.append(('栏杆来源原始坐标',['栏杆 / 轮廓','原图顶点','原始XY / 单位','逐坐标依据'],
-                       [[t['name']+' / R'+str(i),p['name'],json.dumps(p['parameters'])+' '+p['unit'],json.dumps(p['evidence'])] for t in railings for i,r in enumerate(t['source_geometry']['polygon_rings'],1) for p in r['points']]))
+        if any(t['source_geometry']['kind']=='polygon_region' for t in railings):
+            result.append(('栏杆来源原始坐标',['栏杆 / 轮廓','原图顶点','原始XY / 单位','逐坐标依据'],
+                           [[t['name']+' / R'+str(i),p['name'],json.dumps(p['parameters'])+' '+p['unit'],json.dumps(p['evidence'])] for t in railings for i,r in enumerate(t['source_geometry'].get('polygon_rings',[]),1) for p in r['points']]))
+    route_railings=[t for t in railings if t['railing_summary'].get('source_kind')=='design_route']
+    if route_railings:
+        result.append(('坐标线栏杆口径与段长',['栏杆 / 原段','计长口径','三维长 / 水平长（m）','本口径原段长 / 计入长（m）','起终XYZ（m）','口径依据'],
+                       [[t['name']+' / S'+str(e['edge_index']),t['railing_summary']['length_basis_label'],e['spatial_length']+' / '+e['horizontal_length'],e['length']+' / '+e['selected_length'],json.dumps(e['from_xyz'])+' → '+json.dumps(e['to_xyz']),t['source_evidence']['railing.length_basis']] for t in route_railings for e in t['railing_edges']]))
+        result.append(('坐标线栏杆原始XYZ',['栏杆 / 来源点','原始XYZ','原始单位','逐坐标依据','共同坐标与高程基准'],
+                       [[t['name']+' / P'+str(i)+' '+p['name'],json.dumps(p['parameters']),p['unit'],json.dumps(p['evidence']),t['coordinate_basis']] for t in route_railings for i,p in enumerate(t['source_geometry']['route_points'],1)]))
     surfaces = [t for t in snapshot['takeoffs'] if t.get('surface_summary')]
     if surfaces:
         result.append(('表面计量汇总', ['构件', '用途', '来源空间构件 / 版本', '单组边界面积', '单组计入 / 排除面积', '重复数量 / 工程量', '计量依据', '来源版本哈希'],

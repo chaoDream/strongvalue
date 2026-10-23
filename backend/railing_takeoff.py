@@ -8,24 +8,38 @@ from .engine import DomainError, precise, quantity_number
 from .measurement_units import LENGTH, VERSION as UNIT_VERSION
 from .planar_takeoff import linear
 from .polygon_takeoff import calculate as polygon_quantity, validate as validate_polygon
-from .surface_takeoff import snapshot, check_sources
+from .surface_takeoff import snapshot as polygon_snapshot, check_sources
 
 VERSION = 'polygon-railing-length-1.0'
 NOTICE = '仅按已审水平多边形原边的设计水平长度计栏杆，包含闭合末边及孔边候选；每边须明确排除、整边或局部区间。S从所列原边起点沿边增加，跨边范围须分别录入，区间不得重叠。来源轮廓不证明安装位置、栏杆高度或实际做法，须依据原件确认。重复数量只继承一次，不推断坡段三维长、立柱数量、扶手多道、弯头、搭接、质量或扣减规范。'
 ROUNDING = 'Decimal 80位；原边平方根及逐区间长度不单独修约，累计后仅乘一次来源重复数量，总长HALF_UP按明确位数修约；局部端距以精确有理数平方比较原边长度上限，不按显示长度容差放行'
 
 
+def snapshot(source):
+    if source['kind']=='design_route':
+        from .route_takeoff import snapshot as route_snapshot
+        return route_snapshot(source)
+    return polygon_snapshot(source)
+
+
 def source_component(p, cid):
     from .main import find
     s = find(p, 'components', cid)
-    if s['kind'] != 'polygon_region' or s['state'] != 'approved':
-        raise HTTPException(409, '栏杆边线须选择当前已审定的水平设计多边形')
-    validate_polygon(p, s, saved=True)
+    if s['kind'] not in ('polygon_region','design_route') or s['state'] != 'approved':
+        raise HTTPException(409, '栏杆边线须选择当前已审定的水平多边形或设计坐标线')
+    if s['kind']=='design_route':
+        from .route_takeoff import validate as validate_route
+        validate_route(p,s,saved=True)
+    else:validate_polygon(p, s, saved=True)
     return s
 
 
 @precise
-def boundary(source):
+def boundary(source,length_basis=None):
+    if source['kind']=='design_route':
+        from .route_railing import boundary as route_boundary
+        return route_boundary(source,length_basis)
+    if length_basis is not None:raise DomainError('多边形栏杆沿用原水平口径，不得混入设计坐标线计长选项')
     r = polygon_quantity(source); rows = []
     for ring in r['polygon_rings']:
         points = ring['points']; ri = ring['index']
@@ -46,11 +60,14 @@ def boundary(source):
     return {**r, 'railing_edges':rows}
 
 
-def candidates(p,cid):
-    s=source_component(p,cid);r=boundary(s)
+def candidates(p,cid,length_basis=None):
+    s=source_component(p,cid);r=boundary(s,length_basis)
+    notice=NOTICE
+    if s['kind']=='design_route':
+        from .route_railing import NOTICE as notice
     return {'source_component_id':s['id'],'source_component_hash':store.digest(snapshot(s)),
             'source_name':s['name'],'source_revision':s['revision'],'multiplicity':s['multiplicity'],
-            'railing_edges':r['railing_edges'],'notice':NOTICE}
+            'railing_edges':r['railing_edges'],'notice':notice,**({'length_basis':length_basis,'source_kind':'design_route'} if s['kind']=='design_route' else {})}
 
 
 @precise
@@ -65,7 +82,9 @@ def calculate(comp,source=None):
         text(comp.get(key),label,200 if key=='name' else 2000)
     digits=comp.get('rounding_digits')
     if type(digits) is not int or not 0<=digits<=12:raise DomainError('栏杆总长修约位数须明确为0至12的整数')
-    r=boundary(s);edges=r['railing_edges'];decisions=comp.get('edge_decisions')
+    route=s['kind']=='design_route'
+    if not route and ('length_basis' in comp or 'length_basis_evidence_id' in comp):raise DomainError('多边形来源不能混入坐标线计长口径')
+    r=boundary(s,comp.get('length_basis'));edges=r['railing_edges'];decisions=comp.get('edge_decisions')
     if not isinstance(decisions,list) or len(decisions)!=len(edges):raise DomainError('须为全部外轮廓及孔边明确计量决定，不能遗漏')
     by_id={}
     for d in decisions:
@@ -81,6 +100,7 @@ def calculate(comp,source=None):
     dimensions=dict(r['dimensions']);refs=dict(r['source_evidence']);conversions=list(r['unit_conversions'])
     for key in ('basis','installation','material','rounding'):
         refs['railing.'+key]=text(comp.get(key+'_evidence_id'),'栏杆原始依据',200)
+    if route:refs['railing.length_basis']=text(comp.get('length_basis_evidence_id'),'栏杆三维或投影计长口径原始依据',200)
     rows=[];nodes=[];total=Decimal(0);available=Decimal(0)
     for e in edges:
         d=by_id[e['edge_id']];key='railing.'+str(e['index']);refs[key+'.basis']=d['evidence_id']
@@ -110,7 +130,7 @@ def calculate(comp,source=None):
         rows.append({**e,**d,'normalized_ranges':parts,'selected_length':str(value),'selected_formula_ast':ast})
     count=Decimal(s['multiplicity']);gross=quantity_number(total*count)
     quantity=quantity_number(gross.quantize(Decimal(1).scaleb(-digits),rounding=ROUND_HALF_UP))
-    return {'quantity':str(quantity),'unit':'m','gross':str(gross),'deduction':'0','parameters':{},
+    output = {'quantity':str(quantity),'unit':'m','gross':str(gross),'deduction':'0','parameters':{},
             'formula':'Σ核定原边水平范围长度 × '+str(count)+'；仅总长修约'+str(digits)+'位',
             'formula_ast':{'op':'round','args':[op('multiply',op('add',*nodes),{'dimension':'multiplicity'})],'digits':digits,'mode':'HALF_UP'},
             'dimensions':dimensions,'source_evidence':refs,'unit_conversions':conversions,'coordinate_basis':s['coordinate_basis'],
@@ -120,6 +140,12 @@ def calculate(comp,source=None):
                                'single_length':str(total),'multiplicity':str(count),'unrounded_quantity':str(gross),
                                'rounding_digits':digits,'rounding_adjustment':str(quantity-gross)},
             'rule_version':VERSION,'rounding_rule':ROUNDING,'notice':NOTICE}
+    if route:
+        from .route_railing import VERSION as route_version, NOTICE as route_notice, BASES
+        label=BASES[comp['length_basis']]
+        output.update(rule_version=route_version,notice=route_notice,formula='Σ核定原段'+label+'范围 × '+str(count)+'；仅总长修约'+str(digits)+'位')
+        output['railing_summary'].update(source_kind='design_route',length_basis=comp['length_basis'],length_basis_label=label)
+    return output
 
 
 def validate(p,comp,saved=False):

@@ -15,7 +15,7 @@ TYPES.update({
     'planar_regions': {'label': '平面区域并集与扣减', 'profiles': [profile('area', '平面净面积', 'm²'), profile('volume', '等厚平面净实体体积', 'm³')]},
     'polygon_region': {'label': '水平设计多边形与扣孔', 'profiles': [profile('area', '多边形扣孔后净面积', 'm²'), profile('volume', '多边形等厚净实体体积', 'm³')]},
     'spatial_regions': {'label': '空间长方体并集与扣减', 'profiles': [profile('volume', '空间净实体体积', 'm³')]},
-    'polygon_railing': {'label': '多边形边线栏杆', 'profiles': [profile('length', '核定原边水平范围栏杆长度', 'm')]},
+    'polygon_railing': {'label': '设计边线栏杆', 'profiles': [profile('length', '核定原边水平范围栏杆长度', 'm'), profile('spatial_length', '设计坐标线三维栏杆长度', 'm'), profile('horizontal_projection', '设计坐标线水平投影栏杆长度', 'm')]},
     'surface_faces': {'label': '已审实体逐面计量', 'profiles': [profile('formwork', '模板接触面', 'm²'), profile('waterproof', '防水展开面', 'm²')]},
     'design_route': {'label': '设计坐标管线', 'profiles': [profile('length', '设计中心线三维长度', 'm')]},
     'station_trench': {'label': '管网变断面沟槽', 'profiles': [profile('volume', '按水平投影计沟槽开挖体积', 'm³')]},
@@ -44,6 +44,8 @@ def component_profile(comp, result):
         key = {'m': 'length', 'm²': 'area', 'm³': 'volume', 'kg': 'mass'}.get(result['unit'])
     elif kind in ('surface_faces', 'circular_chamber'):
         key = comp.get('purpose')
+    elif kind == 'polygon_railing' and result.get('railing_summary',{}).get('source_kind')=='design_route':
+        key={'spatial':'spatial_length','horizontal':'horizontal_projection'}.get(comp.get('length_basis'))
     elif kind == 'chamber_plate':
         key = comp.get('plate_role')
     else:
