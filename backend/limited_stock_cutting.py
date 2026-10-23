@@ -22,12 +22,12 @@ def validate(config,options,prefix,dimensions,refs):
 
 
 def pack(sizes,stocks,trim,limits,limit=5000):
-    caps=[s-trim for s in stocks];order=sorted((j for j,n in enumerate(limits) if n),key=lambda j:(stocks[j],j))
+    trims=trim if isinstance(trim,list) else [trim]*len(stocks);caps=[s-t for s,t in zip(stocks,trims)];order=sorted((j for j,n in enumerate(limits) if n),key=lambda j:(stocks[j],j))
     failure='按核定供应上限无法完成下料，已由容量约束或穷尽搜索证明；请补充供应或重新核定'
     if not order or max(caps[j] for j in order)<max(sizes):raise DomainError(failure)
-    maximum=max(caps[j] for j in order)
+    maximum=max(caps[j] for j in order);minimum_trim=min(trims[j] for j in order)
     count_lower=max((sum(sizes)+maximum-1)//maximum,max((sum(s>=t for s in sizes)+(maximum//t)-1)//(maximum//t) for t in set(sizes)))
-    lower=(sum(sizes)+trim*count_lower,count_lower)
+    lower=(sum(sizes)+minimum_trim*count_lower,count_lower)
     def score(plan):return sum(stocks[j] for j,_ in plan),len(plan)
     def greedy(preference):
         plan=[];loads=[];used=[0]*len(stocks)
@@ -54,7 +54,7 @@ def pack(sizes,stocks,trim,limits,limit=5000):
             if sum(s>=t for s in sizes[i:])>sum(f//t for f in frees)+sum(remaining[j]*(caps[j]//t) for j in order):return
         missing=max(0,suffix[i]-sum(frees));new_count=(missing+maximum-1)//maximum
         if i<len(sizes) and not any(f>=sizes[i] for f in frees):new_count=max(1,new_count)
-        if best is not None and (cost+missing+trim*new_count,len(bins)+new_count)>=score(best):return
+        if best is not None and (cost+missing+minimum_trim*new_count,len(bins)+new_count)>=score(best):return
         if nodes>=limit:aborted=True;return
         nodes+=1
         if i==len(sizes):best=[(j,ps[:]) for j,ps in bins];return

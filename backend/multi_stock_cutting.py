@@ -13,7 +13,7 @@ NOTICE='仅对本组已据原件确认可按需供应、同材质同截面的2�
 def choices(config,stock,stock_ast,trim,unit,prefix,dimensions,refs,conversions):
     c=config
     limited=isinstance(c,dict) and 'supply_limits' in c
-    if not isinstance(c,dict) or set(c)-({'supply_limits'} if limited else set())!={'alternatives','supply_confirmed','measurement_basis','evidence_id'}:raise DomainError('多定尺须填写备选长度、按需供应确认、供应与选择口径说明及原件')
+    if not isinstance(c,dict) or set(c)-({'supply_limits','processing'}&set(c))!={'alternatives','supply_confirmed','measurement_basis','evidence_id'}:raise DomainError('多定尺须填写备选长度、按需供应确认、供应与选择口径说明及原件')
     if limited and c['supply_confirmed'] is not False:raise DomainError('有限供应不能同时确认不限量按需供应，请明确选择供应口径')
     if not limited and c['supply_confirmed'] is not True:raise DomainError('须据原件确认各定尺同规格且可按需供应；限量库存不得用此模式')
     text(c['measurement_basis'],'多定尺供应与选择口径说明');refs[prefix+'.supply_basis']=text(c['evidence_id'],'多定尺供应口径原件',200)
@@ -23,7 +23,7 @@ def choices(config,stock,stock_ast,trim,unit,prefix,dimensions,refs,conversions)
     for i,item in enumerate(items,2):
         if not isinstance(item,dict) or set(item)!={'stock_length','evidence_id'}:raise DomainError('每种备选定尺仅含原始长度和原件')
         number(item['stock_length'],True);v=linear(item['stock_length'],unit,True);length=Fraction(v)
-        if length<=trim:raise DomainError('每种备选定尺须大于两端切除总长')
+        if 'processing' not in c and length<=trim:raise DomainError('每种备选定尺须大于两端切除总长')
         if any(x['length']==length for x in result):raise DomainError('备选原材定尺不得与原定尺或其他备选重复')
         key=prefix+'.choices.'+str(i);dimensions[key]=str(item['stock_length']);refs[key]=text(item['evidence_id'],'备选原材定尺原件',200)
         ast=op('multiply',{'dimension':key},{'constant':LENGTH[unit]});result.append(dict(index=i,length=length,ast=ast))
@@ -40,7 +40,7 @@ def pack(sizes,stocks,trim,limit=5000,limits=None):
     if limits is not None:
         from .limited_stock_cutting import pack as limited_pack
         return limited_pack(sizes,stocks,trim,limits,limit)
-    capacities=[s-trim for s in stocks];order=sorted(range(len(stocks)),key=lambda j:(stocks[j],j))
+    trims=trim if isinstance(trim,list) else [trim]*len(stocks);capacities=[s-t for s,t in zip(stocks,trims)];minimum_trim=min(trims);order=sorted(range(len(stocks)),key=lambda j:(stocks[j],j))
     def score(plan):return sum(stocks[j] for j,_ in plan),len(plan)
     candidates=[]
     for allowed in [order]+[[j] for j in order if capacities[j]>=max(sizes)]:
@@ -53,7 +53,7 @@ def pack(sizes,stocks,trim,limit=5000,limits=None):
         candidates.append(plan)
     best=min(candidates,key=score);initial=score(best);maximum=max(capacities)
     count_lower=max((sum(sizes)+maximum-1)//maximum,max((sum(s>=t for s in sizes)+(maximum//t)-1)//(maximum//t) for t in set(sizes)))
-    length_lower=sum(sizes)+trim*count_lower;lower=(length_lower,count_lower)
+    length_lower=sum(sizes)+minimum_trim*count_lower;lower=(length_lower,count_lower)
     nodes=0;aborted=False;seen=set();bins=[];loads=[];suffix=[0]*(len(sizes)+1)
     for i in range(len(sizes)-1,-1,-1):suffix[i]=suffix[i+1]+sizes[i]
     def search(i,cost):
@@ -62,7 +62,7 @@ def pack(sizes,stocks,trim,limit=5000,limits=None):
         free=sum(capacities[j]-loads[k] for k,(j,_) in enumerate(bins));missing=max(0,suffix[i]-free)
         new_count=(missing+maximum-1)//maximum
         if i<len(sizes) and not any(capacities[j]-loads[k]>=sizes[i] for k,(j,_) in enumerate(bins)):new_count=max(new_count,1)
-        if (cost+missing+trim*new_count,len(bins)+new_count)>=score(best):return
+        if (cost+missing+minimum_trim*new_count,len(bins)+new_count)>=score(best):return
         if nodes>=limit:aborted=True;return
         nodes+=1
         if i==len(sizes):best=[(j,ps[:]) for j,ps in bins];return
