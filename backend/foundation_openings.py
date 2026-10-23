@@ -11,6 +11,8 @@ FIELDS=('x','y','diameter')
 
 
 def validate_config(c):
+    from . import foundation_recesses
+    if foundation_recesses.enabled(c):return foundation_recesses.validate_config(c)
     if not isinstance(c,dict) or set(c)!={'unit','coordinate_basis','coordinate_evidence_id','scope_confirmed','holes'}:raise DomainError('基础贯通孔须明确局部XY单位、共同中心坐标依据、贯通范围确认及孔表')
     if c['scope_confirmed'] is not True:raise DomainError('须确认每个孔竖直贯穿本基础全部层，采用实际孔径和共同中心局部XY，不重复扣减')
     text(c['coordinate_basis'],'基础中心原点及局部XY方向',2000);text(c['coordinate_evidence_id'],'基础孔位坐标原件',200)
@@ -25,6 +27,8 @@ def validate_config(c):
 
 
 def apply(d,gross,gross_ast,tiers,parameters,key,dimensions,refs,conversions):
+    from . import foundation_recesses
+    if foundation_recesses.enabled(d['through_holes']):return foundation_recesses.apply(d,gross,gross_ast,tiers,parameters,key,dimensions,refs,conversions)
     c=d['through_holes'];validate_config(c);refs[key+'.holes.coordinate']=text(c['coordinate_evidence_id'],'基础孔位坐标原件',200)
     round_shape=d.get('shape') in ('circular','stepped_circular');layers=tiers if tiers is not None else [dict(index=1,normalized_parameters=parameters,single_level_volume=str(gross),formula_asts=dict(single_level_volume=gross_ast))]
     height_nodes=[]

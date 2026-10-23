@@ -416,24 +416,35 @@ def tables(p, q, approved):
                        [[t['name']+' / M'+str(d['material_index'])+' / L'+str(v['index']),foundation_dims(d,v,True)+' '+d['length_unit'],foundation_proofs(d,v) if round_foundation(d) else '；'.join(label+'：'+v['evidence'][k] for k,label in [('length','长'),('width','宽'),('height','净层高')])] for t,d,v in tiers]))
     circular_foundations=[t for t in foundations if any(round_foundation(d) for d in t['foundation_items'])]
     if circular_foundations:
-        result.append(('圆形基础圆周率与口径',['基础构件','圆周率与计算、适用范围'],[[t['name'],'π='+t['foundation_pi_constant']+('；圆柱毛体积π/4×实际直径²×净高，台阶逐层相加，减明确列入的贯通孔；仅净总体积修约。' if t.get('foundation_opening_summary') else '；圆柱π/4×实际直径²×净高，台阶逐层相加；仅总体积修约。')+t['notice']] for t in circular_foundations]))
+        result.append(('圆形基础圆周率与口径',['基础构件','圆周率与计算、适用范围'],[[t['name'],'π='+t['foundation_pi_constant']+('；圆柱毛体积π/4×实际直径²×净高，台阶逐层相加，减明确列入的有效圆孔；仅净总体积修约。' if t.get('rule_version')=='railing-post-foundation-1.4' else '；圆柱毛体积π/4×实际直径²×净高，台阶逐层相加，减明确列入的贯通孔；仅净总体积修约。' if t.get('foundation_opening_summary') else '；圆柱π/4×实际直径²×净高，台阶逐层相加；仅总体积修约。')+t['notice']] for t in circular_foundations]))
     opened_foundations=[t for t in foundations if t.get('foundation_opening_summary')]
     opening_rows=[(t,d) for t in opened_foundations for d in t['foundation_items'] if d.get('opening_holes')]
     if opened_foundations:
-        balances=[];proofs=[];checks=[];scopes=[]
+        balances=[];proofs=[];checks=[];scopes=[];segments=[];vertical_proofs=[]
+        finite_openings=any(t.get('rule_version')=='railing-post-foundation-1.4' for t in opened_foundations)
+        opening_title='基础圆孔' if finite_openings else '基础贯通孔'
         for t,d in opening_rows:
             name=t['name']+' / M'+str(d['material_index']);count=Decimal(d['total_count'])
             balances.append([name+' / 整个基础',d['single_gross_volume']+' / '+d['single_opening_volume']+' / '+d['single_foundation_volume'],d['total_count'],d['total_gross_volume']+' / '+d['total_opening_volume']+' / '+d['total_volume'],str(len(d['opening_holes']))])
-            for v in d.get('foundation_levels',[]):balances.append([name+' / L'+str(v['index']),v['single_level_volume']+' / '+v['single_opening_volume']+' / '+v['net_level_volume'],d['total_count'],v['total_gross_volume']+' / '+v['total_opening_volume']+' / '+v['total_volume'],'同一批孔贯穿本层，不另加孔数'])
+            for v in d.get('foundation_levels',[]):balances.append([name+' / L'+str(v['index']),v['single_level_volume']+' / '+v['single_opening_volume']+' / '+v['net_level_volume'],d['total_count'],v['total_gross_volume']+' / '+v['total_opening_volume']+' / '+v['total_volume'],'仅扣实际相交高度，不另加孔数' if finite_openings else '同一批孔贯穿本层，不另加孔数'])
             scopes.append([name,d['through_holes']['coordinate_basis']+'；坐标原件：'+d['through_holes']['coordinate_evidence_id']+'；π='+t['foundation_pi_constant']+'；'+t['notice']+'；'+t['rule_version']])
             for h in d['opening_holes']:
-                hn=name+' / H'+str(h['index'])+' '+h['name'];proofs.append([hn,'X='+str(h['parameters']['x'])+'，Y='+str(h['parameters']['y'])+'，实际Φ='+str(h['parameters']['diameter'])+' '+h['unit'],h['through_height']+' / '+h['single_volume'],'；'.join({'x':'孔心X','y':'孔心Y','diameter':'实际孔径','measurement_basis':'贯通说明'}[k]+'：'+h['evidence'][k] for k in ('x','y','diameter','measurement_basis'))+'；'+h['measurement_basis']])
+                hn=name+' / H'+str(h['index'])+' '+h['name'];proofs.append([hn,'X='+str(h['parameters']['x'])+'，Y='+str(h['parameters']['y'])+'，实际Φ='+str(h['parameters']['diameter'])+' '+h['unit'],h['through_height']+' / '+h['single_volume'],'；'.join({'x':'孔心X','y':'孔心Y','diameter':'实际孔径','measurement_basis':'扣减范围说明' if finite_openings else '贯通说明'}[k]+'：'+h['evidence'][k] for k in ('x','y','diameter','measurement_basis'))+'；'+h['measurement_basis']])
+                if h.get('segments'):
+                    vertical_proofs.append([hn,h['z_start']+' → '+h['z_end']+' m',h['through_height']+' m','；'.join(('起始Z' if k=='z_start' else '终止Z')+'='+str(h['vertical_range']['parameters'][k])+' '+h['unit']+'；原件：'+h['vertical_range']['evidence'][k] for k in ('z_start','z_end')) if 'vertical_range' in h else '贯通全部基础；起止Z由已审各层高度累计，不另填深度'])
+                    for v in h['segments']:segments.append([hn+' / L'+str(v['level_index']),v['z_start']+' → '+v['z_end'],v['height'],v['single_volume']])
                 for c in h['containments']:checks.append([hn+' / L'+str(c['level_index']),'逐层包含','；'.join({'x':'X方向','y':'Y方向','radial_squared':'径向平方'}[k]+'='+v+('m²' if k=='radial_squared' else 'm') for k,v in c['margins'].items()),'相切' if c['state']=='tangent' else '完全在内'])
-            for c in d['opening_checks']:checks.append([name+' / '+c['left']+' / '+c['right'],'孔心距平方−半径和平方',c['margin']+'m²','相切' if c['state']=='tangent' else '分离'])
-        result.append(('基础贯通孔毛扣净',['基础构件 / 立柱项 / 基础或层','每基础毛 / 扣 / 净（m³）','全部基础个数','全部毛 / 扣 / 净（m³）','每基础孔数或说明'],balances))
-        result.append(('基础贯通孔原始依据',['基础构件 / 立柱项 / 孔','原始孔心XY及实际孔径 / 单位','贯通高（m）/ 每基础本孔扣减（m³）','逐参数原件及贯通说明'],proofs))
-        result.append(('基础贯通孔校验',['基础构件 / 立柱项 / 孔或孔对','校验类别','精确余量（非结构净距验收）','几何状态'],checks))
-        result.append(('基础贯通孔范围与常量',['基础构件 / 立柱项','共同中心坐标、原件、圆周率与适用范围'],scopes))
+            for c in d['opening_checks']:
+                state={'tangent':'截面相切','disjoint':'截面分离','vertically_disjoint':'标高相离','vertical_tangent':'仅端面接触'}.get(c['state'],c['state']) if 'vertical_gap' in c else '相切' if c['state']=='tangent' else '分离'
+                checks.append([name+' / '+c['left']+' / '+c['right'],'孔心距平方−半径和平方',c['margin']+'m²',state])
+                if 'vertical_gap' in c:checks.append([name+' / '+c['left']+' / '+c['right'],'标高分离余量（负值为正高度相交）',c['vertical_gap']+'m',state])
+        result.append((opening_title+'毛扣净',['基础构件 / 立柱项 / 基础或层','每基础毛 / 扣 / 净（m³）','全部基础个数','全部毛 / 扣 / 净（m³）','每基础孔数或说明'],balances))
+        result.append((opening_title+'原始依据',['基础构件 / 立柱项 / 孔','原始孔心XY及实际孔径 / 单位','有效高度（m）/ 每基础本孔扣减（m³）' if finite_openings else '贯通高（m）/ 每基础本孔扣减（m³）','逐参数原件及扣减范围说明' if finite_openings else '逐参数原件及贯通说明'],proofs))
+        result.append((opening_title+'校验',['基础构件 / 立柱项 / 孔或孔对','校验类别','精确余量（非结构净距验收）','几何状态'],checks))
+        result.append((opening_title+'范围与常量',['基础构件 / 立柱项','共同中心坐标、原件、圆周率与适用范围'],scopes))
+        if finite_openings:
+            result.append(('基础圆孔标高依据',['基础构件 / 立柱项 / 孔','实际起止Z（m，基础底为0向上）','有效高度','原始标高、单位及原件'],vertical_proofs))
+            result.append(('基础圆孔逐层相交',['基础构件 / 立柱项 / 孔 / 层','实际相交起止Z（m）','有效相交高度（m）','每基础本孔本层扣减（m³）'],segments))
     materials=[t for t in snapshot['takeoffs'] if t.get('material_summary')]
     if materials:
         labels={'source_single_length':'来源单组未修约计入长度（m）','single_group_mass':'单组材料质量（kg）','multiplicity':'来源重复数量','unrounded_quantity':'未修约总质量（kg）','rounding_digits':'总质量修约位数','rounding_adjustment':'总质量修约差额（kg）'}
@@ -826,7 +837,7 @@ def tables(p, q, approved):
                          d['baseline_evidence_id']+', '+d['evidence_id']] for d in snapshot['quantity_diagnoses']]))
     # Long analyses must remain printable in Excel's bounded row height.
     for i,(title,headers,rows) in enumerate(result):
-        if not ((circular_foundations or opened_foundations) and title in ('立柱基础体积汇总','立柱基础逐项体积','立柱基础原始尺寸与依据','立柱基础材料范围与修约','台阶基础逐层体积','台阶基础逐层原件','圆形基础圆周率与口径','基础贯通孔毛扣净','基础贯通孔原始依据','基础贯通孔校验','基础贯通孔范围与常量')) and title not in ('多边形净量汇总','多边形外轮廓与孔','多边形原始顶点','多边形逐边计算','多边形扣孔边界校验','图纸身份候选采用','图纸校核待办','图纸目录与版次','平立剖图纸互参','项目事实与冲突候选','清单映射适用范围','清单编码映射依据','井板逐孔定位与扣减','井板孔包含与分离校验','井底盖板净实体汇总','井板逐项尺寸与孔扣减','井板标高范围及原件','井板材料做法与规则','检查井井筒计量汇总','井筒逐井尺寸与数量','井筒定位及原始依据','井筒材料做法与规则','管网矩形垫层汇总','垫层逐段尺寸与体积','垫层材料施工与修约','垫层来源设计坐标','管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
+        if not ((circular_foundations or opened_foundations) and title in ('立柱基础体积汇总','立柱基础逐项体积','立柱基础原始尺寸与依据','立柱基础材料范围与修约','台阶基础逐层体积','台阶基础逐层原件','圆形基础圆周率与口径','基础贯通孔毛扣净','基础贯通孔原始依据','基础贯通孔校验','基础贯通孔范围与常量','基础圆孔毛扣净','基础圆孔原始依据','基础圆孔校验','基础圆孔范围与常量','基础圆孔标高依据','基础圆孔逐层相交')) and title not in ('多边形净量汇总','多边形外轮廓与孔','多边形原始顶点','多边形逐边计算','多边形扣孔边界校验','图纸身份候选采用','图纸校核待办','图纸目录与版次','平立剖图纸互参','项目事实与冲突候选','清单映射适用范围','清单编码映射依据','井板逐孔定位与扣减','井板孔包含与分离校验','井底盖板净实体汇总','井板逐项尺寸与孔扣减','井板标高范围及原件','井板材料做法与规则','检查井井筒计量汇总','井筒逐井尺寸与数量','井筒定位及原始依据','井筒材料做法与规则','管网矩形垫层汇总','垫层逐段尺寸与体积','垫层材料施工与修约','垫层来源设计坐标','管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'): continue
         expanded = []
         for row in rows:
             cells = [str(v).replace('\r', '').replace('\n', '；') for v in row]
@@ -884,7 +895,7 @@ def export_report(p, q, fmt, approved, template=None, table_data=None, paginatio
                         unit_digits = (q['snapshot']['rules'][0].get('rounding_config', {}).get('unit_price_digits', 2) if q else 2)
                         cell.number_format = ('#,##0'+('.'+'0'*unit_digits if unit_digits else '')) if header == '单价' and title == '分部分项清单' else '#,##0.##################' if header in ('工程量', '消耗', '换算系数', '资源价格', '单价') else '#,##0.00'
                 s.row_dimensions[row[0].row].height = 48
-                if table_data is not None or any(t[0] in ('圆形基础圆周率与口径','基础贯通孔毛扣净') for t in sections) and title in ('立柱基础体积汇总','立柱基础逐项体积','立柱基础原始尺寸与依据','立柱基础材料范围与修约','台阶基础逐层体积','台阶基础逐层原件','圆形基础圆周率与口径','基础贯通孔毛扣净','基础贯通孔原始依据','基础贯通孔校验','基础贯通孔范围与常量') or title in ('多边形净量汇总','多边形外轮廓与孔','多边形原始顶点','多边形逐边计算','多边形扣孔边界校验','图纸身份候选采用','图纸校核待办','图纸目录与版次','平立剖图纸互参','项目事实与冲突候选','清单映射适用范围','清单编码映射依据','井板逐孔定位与扣减','井板孔包含与分离校验','井底盖板净实体汇总','井板逐项尺寸与孔扣减','井板标高范围及原件','井板材料做法与规则','检查井井筒计量汇总','井筒逐井尺寸与数量','井筒定位及原始依据','井筒材料做法与规则','管网矩形垫层汇总','垫层逐段尺寸与体积','垫层材料施工与修约','垫层来源设计坐标','管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
+                if table_data is not None or any(t[0] in ('圆形基础圆周率与口径','基础贯通孔毛扣净','基础圆孔毛扣净') for t in sections) and title in ('立柱基础体积汇总','立柱基础逐项体积','立柱基础原始尺寸与依据','立柱基础材料范围与修约','台阶基础逐层体积','台阶基础逐层原件','圆形基础圆周率与口径','基础贯通孔毛扣净','基础贯通孔原始依据','基础贯通孔校验','基础贯通孔范围与常量','基础圆孔毛扣净','基础圆孔原始依据','基础圆孔校验','基础圆孔范围与常量','基础圆孔标高依据','基础圆孔逐层相交') or title in ('多边形净量汇总','多边形外轮廓与孔','多边形原始顶点','多边形逐边计算','多边形扣孔边界校验','图纸身份候选采用','图纸校核待办','图纸目录与版次','平立剖图纸互参','项目事实与冲突候选','清单映射适用范围','清单编码映射依据','井板逐孔定位与扣减','井板孔包含与分离校验','井底盖板净实体汇总','井板逐项尺寸与孔扣减','井板标高范围及原件','井板材料做法与规则','检查井井筒计量汇总','井筒逐井尺寸与数量','井筒定位及原始依据','井筒材料做法与规则','管网矩形垫层汇总','垫层逐段尺寸与体积','垫层材料施工与修约','垫层来源设计坐标','管道外包体积汇总','管道逐段外径与占位','管道外包口径与常量','管道外包来源坐标','关联回填平衡','回填逐项扣减','回填来源计算索引','回填范围与修约','变断面沟槽汇总','沟槽站点断面','沟槽分段体积','沟槽来源坐标','设计管线长度汇总','管线设计坐标','三维管段计算','表面分区坐标','表面计量汇总','逐面计量决定','表面几何来源','表面计量规则','空间并集与扣减','长方体原始坐标','空间分层计算','空间分层条带','空间相交定位','区域并集与扣减','平面区域与坐标','区域条带计算过程','区域相交定位','算量原始单位换算','分项算量与扣减明细','分项规则与精度','工程量差异诊断','批量调量台账','变更签证台账','待询价与匹配任务','材料替换台账','工程结构与归属','分级汇总','分级取费规则','费用与税金','定额候选采用台账','企业定额复用台账'):
                     import math, unicodedata
                     width = min(55,max(15,110/len(headers)))-2
                     lines = max(sum(max(1,math.ceil(sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in line)/width)) for line in str(cell.value or '').split('\n')) for cell in row)
