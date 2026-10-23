@@ -415,10 +415,14 @@ def tables(p, q, approved):
                              t['source_geometry']['coordinate_basis']+'；'+t['source_geometry']['measurement_basis']] for t in polygon_surfaces]))
         result.append(('表面计量规则', ['构件', '边界规则版本', '精度', '适用范围'],
                        [[t['name'], t['rule_version'], t['rounding_rule'], t['notice']] for t in surfaces]))
-    cuts = [[t['name'], '原F'+str(c['parent_index']), c['coordinate_axis'], c['original_value']+' '+c['source_unit'],
+    cuts = [[t['name'], '原F'+str(c['parent_index']), (('原边局部S' if c['coordinate_axis']=='s' else '底面局部Z') if c.get('coordinate_system')=='edge_local' else c['coordinate_axis']), c['original_value']+' '+c['source_unit'],
              c['factor'], c['canonical_value']+' m', c['evidence_id'], c['rule_version']] for t in snapshot['takeoffs'] for c in t.get('surface_subdivisions', [])]
     if cuts:
-        result.append(('表面分区坐标', ['表面构件','原始面','分割坐标轴','原值 / 单位','换算倍数','设计坐标','原始依据','单位规则'], cuts))
+        result.append(('表面分区坐标', ['表面构件','原始面','分割坐标轴','原值 / 单位','换算倍数','换算后位置','原始依据','单位规则'], cuts))
+    partition_checks = [[t['name'], '原F'+str(c['parent_index'])+' / '+str(c['child_count'])+'子面', c['parent_area'], c['children_area'], c['area_difference'], '有限十进制展开范围完整闭合；80位子面不调平，差额为计算精度差']
+                        for t in snapshot['takeoffs'] for c in t.get('surface_partition_checks', [])]
+    if partition_checks:
+        result.append(('多边形侧面分区校验', ['构件', '原面 / 子面数', '原面积（m²）', '子面合计（m²）', '精度差（m²）', '校验说明'], partition_checks))
     if not q:
         from .main import blockers
         next(table[2] for table in result if table[0] == '缺项与警示').extend([[x] for x in blockers(p)])

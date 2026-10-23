@@ -110,8 +110,11 @@ def source_notice(source):
 def candidates(p, cid):
     source = source_component(p, cid)
     result = boundary(source)
+    notice=source_notice(source)
+    if source['kind']=='polygon_region':
+        from .polygon_side_partitions import NOTICE as notice
     return {**result, 'base_faces': result['faces'], 'source_component_id': source['id'], 'source_component_hash': store.digest(snapshot(source)),
-            'source_name': source['name'], 'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': source_notice(source)}
+            'source_name': source['name'], 'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': notice}
 
 
 @precise
@@ -122,7 +125,8 @@ def partition(source, subdivisions):
     if not subdivisions:
         return result
     if source['kind'] == 'polygon_region':
-        raise DomainError('多边形实体暂不支持局部分区；不得将净面或斜边侧面当作轴向矩形切分')
+        from .polygon_side_partitions import partition as partition_sides
+        return partition_sides(source, subdivisions, result)
     originals = {f['face_id']: f for f in result['faces']}
     by_id, records, faces = {}, [], []
     for i, group in enumerate(subdivisions):
@@ -194,9 +198,12 @@ def partition_candidates(p, body):
         raise HTTPException(409, '来源空间构件已修订，请重新读取边界面')
     result = partition(source, body.get('face_subdivisions'))
     check_sources(p, result['source_evidence'])
+    notice=source_notice(source)
+    if source['kind']=='polygon_region':
+        from .polygon_side_partitions import NOTICE as notice
     return {**result, 'base_faces': boundary(source)['faces'], 'source_component_id': source['id'],
             'source_component_hash': body['source_component_hash'], 'source_name': source['name'],
-            'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': source_notice(source)}
+            'source_revision': source['revision'], 'multiplicity': source['multiplicity'], 'notice': notice}
 
 
 @precise
@@ -250,6 +257,10 @@ def calculate(comp, source=None):
     if source['kind'] == 'polygon_region':
         from .polygon_surface import VERSION as polygon_version, ROUNDING as polygon_rounding
         output.update(rule_version=polygon_version, rounding_rule=polygon_rounding, notice=source_notice(source))
+        if result.get('surface_partition_checks'):
+            from .polygon_side_partitions import VERSION as partition_version, ROUNDING as partition_rounding, NOTICE as partition_notice
+            output.update(surface_partition_checks=result['surface_partition_checks'], rule_version=partition_version,
+                          rounding_rule=partition_rounding, notice=partition_notice)
     return output
 
 

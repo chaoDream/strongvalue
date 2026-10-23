@@ -1,8 +1,8 @@
 import React,{useState} from 'react';
 import {Plus,Trash2} from 'lucide-react';
 type Obj=Record<string,any>;
-type Props={faces:Obj[];groups:Obj[];onChange:(groups:Obj[])=>void;onApply:()=>void;busy:boolean;dirty:boolean;evidence:(value:string,change:(v:string)=>void,label:string)=>React.ReactNode};
-export default function FacePartitionEditor({faces,groups,onChange,onApply,busy,dirty,evidence}:Props){
+type Props={localEdge?:boolean;faces:Obj[];groups:Obj[];onChange:(groups:Obj[])=>void;onApply:()=>void;busy:boolean;dirty:boolean;evidence:(value:string,change:(v:string)=>void,label:string)=>React.ReactNode};
+export default function FacePartitionEditor({faces,groups,onChange,onApply,busy,dirty,evidence,localEdge=false}:Props){
   const [selected,setSelected]=useState('');
   const face=faces.find(f=>f.face_id===selected)||faces[0];
   if(!face)return null;
@@ -10,8 +10,8 @@ export default function FacePartitionEditor({faces,groups,onChange,onApply,busy,
   function update(axis:string,cuts:Obj[]){const next={...group,[axis+'_cuts']:cuts},others=groups.filter(g=>g.face_id!==face.face_id);
     onChange(next.u_cuts.length||next.v_cuts.length?[...others,next]:others);}
   return <details className="compound-part"><summary>局部分区设置（{groups.length}个原始面）</summary>
-    <p className="form-note">分割线填写面内对应轴的共同设计坐标值，不能填像素或距面边的相对距离。每轴最多8条，坐标严格位于原始面内；变更分区后，新子面须重新核定，未变分面保留决定。</p>
-    <label className="field"><span>选择要分区的原始面</span><select aria-label="选择要分区的原始面" value={face.face_id} onChange={e=>setSelected(e.target.value)}>{faces.map(f=><option key={f.face_id} value={f.face_id}>原F{f.index} · {f.normal}={f.plane}m · {f.u_axis} {f.u_from}至{f.u_to}m / {f.v_axis} {f.v_from}至{f.v_to}m</option>)}</select></label>
+    <p className="form-note">{localEdge?'只对外侧或孔内侧原边展开面分区。S为从原边起点沿P起→P终方向的距离，Z为从局部底面0起的高度；不能填写共同XY或绝对标高。上下扣孔净面不能分区。':'分割线填写面内对应轴的共同设计坐标值，不能填像素或距面边的相对距离。'}每轴最多8条，坐标严格位于原始面内；应用后新子面须重新核定，未变分面保留决定。</p>
+    <label className="field"><span>选择要分区的原始面</span><select aria-label="选择要分区的原始面" value={face.face_id} onChange={e=>setSelected(e.target.value)}>{faces.map(f=><option key={f.face_id} value={f.face_id}>原F{f.index} · {localEdge?f.label:`${f.normal}=${f.plane}m`} · {f.u_axis} {f.u_from}至{f.u_to}m / {f.v_axis} {f.v_from}至{f.v_to}m</option>)}</select></label>
     {['u','v'].map(axis=><fieldset className="compound-part" key={axis}><legend>沿{face[axis+'_axis'].toUpperCase()}坐标分割 · 范围{face[axis+'_from']}至{face[axis+'_to']}m</legend>
       {group[axis+'_cuts'].map((cut:Obj,i:number)=><div className="compound-part" key={i}><div className="form-grid">
         <label className="field"><span>{face[axis+'_axis'].toUpperCase()}分割坐标{i+1}</span><input aria-label={`${axis}分割坐标${i+1}`} type="number" step="any" min="-1000000000000" max="1000000000000" value={cut.value} onChange={e=>update(axis,group[axis+'_cuts'].map((c:Obj,j:number)=>j===i?{...c,value:e.target.value}:c))}/></label>
