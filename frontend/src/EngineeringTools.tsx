@@ -25,6 +25,7 @@ const RouteTakeoffPanel=React.lazy(()=>import('./RouteTakeoffPanel'));
 const SurfaceTakeoffPanel=React.lazy(()=>import('./SurfaceTakeoffPanel'));
 const SpatialTakeoffPanel=React.lazy(()=>import('./SpatialTakeoffPanel'));
 const PlanarTakeoffPanel=React.lazy(()=>import('./PlanarTakeoffPanel'));
+const PolygonTakeoffPanel=React.lazy(()=>import('./PolygonTakeoffPanel'));
 const IntegrationTrialsPanel=React.lazy(()=>import('./IntegrationTrialsPanel'));
 const EngineeringSettlementPanel=React.lazy(()=>import('./EngineeringSettlementPanel'));
 import PdfPreview from './DocumentPreview';
@@ -132,6 +133,7 @@ export default function EngineeringTools({section,p,user,request,refresh,onRevie
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取设计管线…</p>}><RouteTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取空间构件…</p>}><SpatialTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取表面算量…</p>}><SurfaceTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
+  {section==='takeoff'&&<React.Suspense fallback={<p>正在读取设计多边形…</p>}><PolygonTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取平面区域…</p>}><PlanarTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<CompoundTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/>}
   {section==='takeoff'&&<QuantityDiagnosisPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/>}

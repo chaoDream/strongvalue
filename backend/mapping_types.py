@@ -13,6 +13,7 @@ TYPES.update({
     'compound': {'label': '分项合计与逐项扣减', 'profiles': [profile(k, l, u) for k, l, u in
         [('length', '分项净长度', 'm'), ('area', '分项净面积', 'm²'), ('volume', '分项净体积', 'm³'), ('mass', '钢筋表分项净质量', 'kg')]]},
     'planar_regions': {'label': '平面区域并集与扣减', 'profiles': [profile('area', '平面净面积', 'm²'), profile('volume', '等厚平面净实体体积', 'm³')]},
+    'polygon_region': {'label': '水平设计多边形与扣孔', 'profiles': [profile('area', '多边形扣孔后净面积', 'm²'), profile('volume', '多边形等厚净实体体积', 'm³')]},
     'spatial_regions': {'label': '空间长方体并集与扣减', 'profiles': [profile('volume', '空间净实体体积', 'm³')]},
     'surface_faces': {'label': '已审实体逐面计量', 'profiles': [profile('formwork', '模板接触面', 'm²'), profile('waterproof', '防水展开面', 'm²')]},
     'design_route': {'label': '设计坐标管线', 'profiles': [profile('length', '设计中心线三维长度', 'm')]},

@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import hmac
 import io
@@ -20,7 +21,7 @@ from .compound_takeoff import component_quantity, structured_validator, STRUCTUR
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.56.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.57.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -576,6 +577,7 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
     with store.transaction() as c:
         p = project(c, pid, a)
         old = find(p, 'components', cid) if cid else None
+        previous = copy.deepcopy(old) if old else None
         detach_reason=None
         if body.get('kind')=='design_route':
             from .dxf_routes import manual_body
@@ -607,12 +609,14 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
             elif body['kind'] == 'design_route':
                 fields += ['route_points','quantity_type','coordinate_basis','coordinate_evidence_id','multiplicity','multiplicity_evidence_id','rounding_digits','rounding_evidence_id']
                 if 'dxf_trace' in body:fields += ['dxf_trace']
+            elif body['kind'] == 'polygon_region':
+                fields += ['polygon_rings','quantity_type','coordinate_basis','coordinate_evidence_id','multiplicity','multiplicity_evidence_id','rounding_digits','rounding_evidence_id','boundaries_confirmed']
             elif body['kind'] == 'surface_faces':
                 fields += ['quantity_type','purpose','source_component_id','source_component_hash','face_decisions']
                 if 'face_subdivisions' in body: fields += ['face_subdivisions']
             else:
                 fields += ['measurement_parts'] if body['kind']=='compound' else ['regions','quantity_type','coordinate_basis','coordinate_evidence_id','multiplicity','multiplicity_evidence_id']
-            if body['kind']=='planar_regions' and body['quantity_type']=='volume': fields += ['thickness','thickness_unit','thickness_evidence_id']
+            if body['kind'] in ('planar_regions','polygon_region') and body['quantity_type']=='volume': fields += ['thickness','thickness_unit','thickness_evidence_id']
             comp = {k: body[k] for k in fields}
             comp.update(evidence=result['source_evidence'], source_stamp=stamp)
             if body['kind'] in ('surface_faces','station_trench','volume_balance','pipe_envelope','route_bedding','circular_chamber','chamber_plate'): comp['source_geometry'] = result['source_geometry']
@@ -634,7 +638,7 @@ def component(pid: str, body: dict, cid: str = '', a=Depends(actor)):
         if old: invalidate_component_dependents(p, cid)
         comp.update(id=cid or store.uid(), revision=old['revision']+1 if old else 1, state='draft', preview=result)
         if old:
-            p.setdefault('component_history', []).append(dict(old))
+            p.setdefault('component_history', []).append(previous)
             p['components'][p['components'].index(old)] = comp
             for t in p['takeoffs']:
                 if t['component_id'] == cid:
@@ -1207,7 +1211,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.56.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.57.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 def persist_export(c, p, a, format='pdf', quote_id='', template_id='', unpriced=False):

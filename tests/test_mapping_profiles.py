@@ -38,11 +38,11 @@ def design_project(clients, kind='chamber_plate', profile='cover'):
                      'mass': ('rebar_schedule', {'length': '2', 'count': '3', 'unit_weight': '.5'})}[profile]
         b['measurement_parts'] = [{'name': '合成项', 'operation': 'add', 'kind': g, 'parameters': params, 'multiplicity': '1',
                                    'measurement_basis': '仅合成数学口径，无专业效力', 'evidence': {k: eid for k in [*params, 'multiplicity', 'measurement_basis']}}]
-    elif kind in ('planar_regions', 'spatial_regions', 'design_route'):
+    elif kind in ('planar_regions', 'polygon_region', 'spatial_regions', 'design_route'):
         import importlib
-        module = importlib.import_module('tests.test_'+{'planar_regions': 'planar_takeoff', 'spatial_regions': 'spatial_takeoff', 'design_route': 'route_takeoff'}[kind])
+        module = importlib.import_module('tests.test_'+{'planar_regions': 'planar_takeoff', 'polygon_region': 'polygon_takeoff', 'spatial_regions': 'spatial_takeoff', 'design_route': 'route_takeoff'}[kind])
         e, r, pid, b = module.setup(clients)
-        if kind == 'planar_regions': b = module.payload(get(e, pid)['evidence'][0]['id'], profile)
+        if kind in ('planar_regions','polygon_region'): b = module.payload(get(e, pid)['evidence'][0]['id'], profile)
     else:
         import importlib
         module = importlib.import_module('tests.test_'+{'surface_faces': 'surface_takeoff', 'station_trench': 'trench_takeoff',
@@ -86,7 +86,7 @@ def test_catalog_keeps_primitive_forms_separate_and_covers_all_kinds(clients):
     types = e.get('/api/v1/boq-mapping-types').json()
     assert set(types) == set(GEOMETRIES) | set(STRUCTURED_KINDS)
     assert e.get('/api/v1/takeoff-types').json() == GEOMETRIES
-    assert sum(len(v['profiles']) for v in types.values()) == 27
+    assert sum(len(v['profiles']) for v in types.values()) == 29
     for kind, v in types.items():
         for p in v['profiles']: assert selected_profile({'kind': kind, 'measurement_profile': p['id'], 'unit': p['unit']}) == p
 
