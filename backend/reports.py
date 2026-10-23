@@ -415,6 +415,18 @@ def tables(p, q, approved):
                        [[t['name']+' / '+v['name'],str(v['stock_allowance']['joint_count'])+'处 / '+str(v['stock_allowance']['lap_length'])+' '+v['stock_allowance']['length_unit'],str(v['stock_allowance']['loss_percent']),v['stock_allowance']['measurement_basis']+'；已确认原净下料不含本次搭接与损耗；'+'；'.join(stock_proofs[k]+': '+eid for k,eid in v['stock_allowance']['evidence'].items())] for t,v in allowance_rows]))
         result.append(('线材备料规则与范围',['材料表 / 材料项','公式、适用范围及版本'],
                        [[t['name']+' / '+v['name'],v['stock_planning']['notice']+'；'+v['stock_planning']['rule_version']] for t,v in allowance_rows]))
+    cutting_rows=[(t,v) for t in materials for v in t['material_items'] if 'stock_cutting' in v]
+    if cutting_rows:
+        cutting_labels={'net':'净下料','kerf':'锯缝','trim':'两端切除','scrap':'报废余料','retained':'待留用余料','loss':'损耗合计（锯缝＋切除＋报废）','purchased':'原材购入'}
+        cutting_parameters={'stock_length':'原材定尺','kerf_per_piece':'每件锯缝','trim_start':'起端切除','trim_end':'终端切除','reusable_min_length':'可留用余料下限','measurement_basis':'范围口径说明'}
+        result.append(('定尺下料汇总',['材料表 / 项目 / 本表覆盖','全部需求件数','每根最大容量','原材根数','净质量（kg）','购入质量（kg）'],
+                       [[t['name']+' / '+v['name']+'；已编'+str(t['cutting_summary']['item_count'])+'项、未编'+str(t['cutting_summary']['unplanned_item_count'])+'项',str(v['stock_cutting']['required_piece_count']),v['stock_cutting']['capacity'],str(v['stock_cutting']['stock_count']),v['stock_cutting']['total']['net_mass'],v['stock_cutting']['total']['purchased_mass']] for t,v in cutting_rows]))
+        result.append(('定尺下料模式',['材料表 / 项目','原材编号 / 根数','每根件数 / 共出件数','每根净长 / 锯缝 / 切除（m）','每根余料（m）','余料归属'],
+                       [[t['name']+' / '+v['name'],'#'+str(p['first_stock'])+'→#'+str(p['last_stock'])+' / '+str(p['stock_count']),str(p['pieces_per_stock'])+' / '+str(p['produced_count']),p['per_stock']['net_length']+' / '+p['per_stock']['kerf_length']+' / '+p['per_stock']['trim_length'],p['offcut_length'],{'none':'无余料','retain':'待留用（未入库）','scrap':'报废'}[p['offcut_disposition']]] for t,v in cutting_rows for p in v['stock_cutting']['patterns']]))
+        result.append(('定尺长度质量台账',['材料表 / 项目','全部重复后组成','长度（m）','质量（kg）'],
+                       [[t['name']+' / '+v['name'],label,v['stock_cutting']['total'][key+'_length'],v['stock_cutting']['total'][key+'_mass']] for t,v in cutting_rows for key,label in cutting_labels.items()]))
+        result.append(('定尺取整与原件',['材料表 / 项目','取整证明、原始参数及范围依据'],
+                       [[t['name']+' / '+v['name'],'容量：'+g['capacity_certificate']['used_at_capacity']+' ≤ 可用'+g['capacity_certificate']['usable_length']+' < 多一件需'+g['capacity_certificate']['used_at_next']+'m；少一根容量'+g['stock_count_certificate']['previous_capacity']+' < 需求'+str(g['required_piece_count'])+' ≤ 本次容量'+g['stock_count_certificate']['current_capacity']+'件；购入'+g['balance']['purchased_length']+'m = 净下料＋总损耗＋待留用'+g['balance']['net_plus_loss_plus_retained']+'m；差额0m；'+g['measurement_basis']+'；'+'；'.join(label+('：'+str(g[key])+g['length_unit'] if key!='measurement_basis' else '')+' 原件：'+g['evidence'][key] for key,label in cutting_parameters.items())+'；已确认单件下料完整、每件一次锯缝（含最后一件）及两端切除未重复；'+g['notice']+'；'+g['rule_version']] for t,v in cutting_rows for g in [v['stock_cutting']]]))
     panels=[(t,v) for t in materials for v in t['material_items'] if v['mode']=='rect_panels']
     if panels:
         result.append(('板网片净面积与质量',['材料表 / 板网片','外矩形 / 开口并集（m²）','开口直加 / 消除重复（m²）','单片净面积（m²）','每组片数 / 净面积（m²）','面密度（kg/m²）','单组质量（kg）','口径及逐项依据'],

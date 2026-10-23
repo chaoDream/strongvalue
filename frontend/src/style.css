@@ -2810,3 +2810,5 @@ input::placeholder,textarea::placeholder {
 
 .post-spacing-details th,.post-spacing-details td {white-space:normal;overflow-wrap:anywhere;vertical-align:top;}
 .stock-allowance-details th,.stock-allowance-details td {white-space:normal;overflow-wrap:anywhere;vertical-align:top;}
+
+.stock-cutting-details th,.stock-cutting-details td {white-space:normal;overflow-wrap:anywhere;vertical-align:top;}

@@ -71,6 +71,8 @@ def calculate(comp,source=None):
         fields=(common-{'quantity'} if spaced else common)|({'post_ranges','cut_length','length_unit'} if spaced else {'polygon_rings','coordinate_basis'} if polygon else {'length','width','length_unit','openings'} if panel else {'cut_length','length_unit'} if cut else set())
         if spaced and 'spacing_check' in item:fields.add('spacing_check')
         if not panel and 'stock_allowance' in item:fields.add('stock_allowance')
+        if cut and 'cutting_plan' in item:fields.add('cutting_plan')
+        if 'cutting_plan' in item and 'stock_allowance' in item:raise DomainError('同一材料项定尺下料与比例搭接损耗备料不能重复启用，请明确选择一种口径')
         proofs=({'unit_weight','measurement_basis'} if spaced else {'quantity','unit_weight','measurement_basis'})|({'coordinate_basis'} if polygon else {'length','width'} if panel else {'cut_length'} if cut else set())
         if set(item)!=fields or not isinstance(item['evidence'],dict) or set(item['evidence'])!=proofs:raise DomainError('材料项字段与逐参数依据须完整且仅包含当前模式所需内容')
         name=text(item['name'],'材料项名称',200)
@@ -162,6 +164,17 @@ def calculate(comp,source=None):
         output['stock_summary']={'item_count':len(selected),'unplanned_item_count':len(items)-len(selected),'planned_item_indices':[row['index'] for row in rows if 'stock_planning' in row],'total_formula_asts':{k:op('add',*[v['total_formula_asts'][k] for v in selected]) for k in selected[0]['total']},'total':{k:str(quantity_number(sum((Decimal(v['total'][k]) for v in selected),Decimal(0)))) for k in selected[0]['total']},'notice':'仅汇总已启用的线材项，未启用项未编备料；不改变净工程量或报价。'}
         output['rule_version']='railing-material-mass-1.12'
         output['notice']=ALLOWANCE_NOTICE+'；'+output['notice']
+    if any('cutting_plan' in item for item in items):
+        from .stock_cutting import calculate as cutting_quantity,NOTICE as CUTTING_NOTICE
+        selected=[]
+        for row in rows:
+            if 'cutting_plan' not in row:continue
+            cutting=cutting_quantity(row['cutting_plan'],row,groups,'material.'+str(row['index'])+'.cutting_plan')
+            row['stock_cutting']=cutting;selected.append(cutting)
+            dimensions.update(cutting['dimensions']);refs.update(cutting['source_evidence']);conversions.extend(cutting['unit_conversions'])
+        output['cutting_summary']={'item_count':len(selected),'unplanned_item_count':len(items)-len(selected),'stock_count':sum(v['stock_count'] for v in selected),'required_piece_count':sum(v['required_piece_count'] for v in selected),'total_formula_asts':{k:op('add',*[v['total_formula_asts'][k] for v in selected]) for k in selected[0]['total']},'total':{k:str(quantity_number(sum((Decimal(v['total'][k]) for v in selected),Decimal(0)))) for k in selected[0]['total']},'notice':'仅汇总已启用定尺下料的材料项；未启用项不编此表，不跨材料混排或自动入库，不增加净工程量或报价。'}
+        output['rule_version']='railing-material-mass-1.13'
+        output['notice']=CUTTING_NOTICE+'；'+output['notice']
     return output
 
 
