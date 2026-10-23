@@ -180,6 +180,7 @@ def build_price_change(p, body):
                  'price': str(number(item.get('price')))}
         after.pop('price_change_id', None)
         after.pop('library_ref', None)
+        after.pop('supplier_quote_ref', None)
         entries.append({**{k: row[k] for k in ['key', 'boq_id', 'boq_name', 'quota_index', 'resource_index', 'boq_hash', 'resource_hash']},
                         'before': copy.deepcopy(row['resource']), 'after': after})
     ids = {e['boq_id'] for e in entries}

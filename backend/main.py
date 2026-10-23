@@ -20,12 +20,12 @@ from .compound_takeoff import component_quantity, structured_validator, STRUCTUR
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.46.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.47.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
                 '给排水': '管线平纵断面、材质及埋深', '电气': '配电系统及敷设方式', '合同计价': '合同、计量与取费依据'}
-REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions', 'engineering_structures', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references'}
+REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions', 'engineering_structures', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes'}
 
 
 def password_hash(password, salt=None):
@@ -91,7 +91,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes', 'supplier_quote_adoptions']:
         p.setdefault(key, [])
     return p
 
@@ -270,6 +270,8 @@ def price_blockers(p, catalog_context=None):
     out.extend(enterprise_errors(catalog_context or p,p['boq']))
     from .resource_substitutions import reference_errors as substitution_errors
     out.extend(substitution_errors(p))
+    from .supplier_quotes import reference_errors as supplier_errors
+    out.extend(supplier_errors(p))
     return out
 
 
@@ -899,6 +901,9 @@ def apply_review(c, p, body, a, hash_verified=False):
             raise HTTPException(409, '历史诊断只供查阅，请复核最新诊断版本')
     approve = body['decision'] == 'approve'
     if approve:
+        if collection == 'supplier_quotes':
+            from .supplier_quotes import validate as validate_offer
+            validate_offer(p,target)
         if collection == 'integration_trials':
             from .integration_trials import validate
             validate(p, target)
@@ -963,6 +968,9 @@ def apply_review(c, p, body, a, hash_verified=False):
             substitution_issues = substitution_errors({**p, 'boq': [target]})
             if substitution_issues:
                 raise HTTPException(409, '；'.join(substitution_issues))
+            from .supplier_quotes import reference_errors as supplier_errors
+            supplier_issues=supplier_errors({**p,'boq':[target]})
+            if supplier_issues:raise HTTPException(409,'；'.join(supplier_issues))
             from .quota_catalog import reference_errors as catalog_errors
             from .enterprise_quotas import reference_errors as enterprise_errors
             catalog_issues=catalog_errors(p,[target],True)+enterprise_errors(p,[target],True)
@@ -1034,7 +1042,7 @@ def apply_review(c, p, body, a, hash_verified=False):
                     find(p, 'takeoffs', b['takeoff_id'])['state'] = 'stale'
         if not approve and collection in ('drawing_sheets','drawing_references'):
             invalidate(p,'components' if collection=='drawing_sheets' else 'quotes')
-        elif not approve and collection not in ('engineering_settlements', 'integration_trials'):
+        elif not approve and collection not in ('engineering_settlements', 'integration_trials', 'supplier_quotes'):
             if collection == 'boq_mappings':
                 from .boq_mapping import invalidate_dependents
                 invalidate_dependents(p, {target['id']})
@@ -1052,6 +1060,13 @@ def apply_review(c, p, body, a, hash_verified=False):
                 invalidate(p, collection)
         elif collection in ('takeoffs', 'boq') and all(x['state'] == 'approved' for x in p[collection]):
             p['status'] = 'TAKEOFF_APPROVED' if collection == 'takeoffs' else 'BOQ_APPROVED'
+    if collection == 'supplier_quotes' and not approve:
+        ids={x['boq_id'] for x in p['supplier_quote_adoptions'] if x['quote_id']==target['id']}
+        if ids:
+            for b in p['boq']:
+                if b['id'] in ids and any(r.get('supplier_quote_ref',{}).get('quote_id')==target['id'] for q in b['quotas'] for r in q['resources']):
+                    b['state']='stale'
+            invalidate(p,'quotes')
     if collection == 'engineering_structures':
         invalidate(p, 'quotes')
     if collection in ('drawing_sheets','drawing_references'):
@@ -1136,6 +1151,8 @@ def quote(pid: str, a=Depends(actor)):
         snapshot['enterprise_quota_adoptions']=p['enterprise_quota_adoptions']
         snapshot['drawing_sheets']=p['drawing_sheets']
         snapshot['drawing_references']=p['drawing_references']
+        snapshot['supplier_quotes']=p['supplier_quotes']
+        snapshot['supplier_quote_adoptions']=p['supplier_quote_adoptions']
         from .scoped_rules import validate as validate_scoped
         validate_scoped(p, ruleset)
         result = calculate(p['boq'], ruleset, current_structure(p))
@@ -1176,7 +1193,7 @@ def capabilities():
 
 @app.get('/api/v1/health')
 def health():
-    return {'status': 'ok', 'version': '0.46.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
+    return {'status': 'ok', 'version': '0.47.0', 'storage': 'sqlite-local', 'ai': 'not_configured'}
 
 
 def persist_export(c, p, a, format='pdf', quote_id='', template_id='', unpriced=False):
@@ -1329,6 +1346,9 @@ app.include_router(ocr_transcription_router)
 
 from .transcription_facts import router as transcription_facts_router
 app.include_router(transcription_facts_router)
+
+from .supplier_quotes import router as supplier_quotes_router
+app.include_router(supplier_quotes_router)
 
 dist = Path(__file__).parent.parent/'frontend'/'dist'
 if dist.exists():

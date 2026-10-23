@@ -2664,6 +2664,15 @@ input::placeholder,textarea::placeholder {
 .resource-price-selection { max-height:320px; overflow:auto; margin-bottom:14px; }
 .resource-price-selection table { width:100%; }
 .resource-price-selection td input[type=number] { min-width:100px; max-width:160px; }
+.supplier-quotes-panel > .field { margin:0 20px 16px; }
+.supplier-quotes-panel table { table-layout:fixed; width:100%; min-width:0; }
+.supplier-quotes-panel th,.supplier-quotes-panel td { min-width:0; white-space:normal; overflow-wrap:anywhere; }
+.supplier-quotes-panel th:first-child { width:24%; }
+.supplier-quotes-panel th:nth-child(2) { width:17%; }
+.supplier-quotes-panel th:nth-child(3) { width:18%; }
+.supplier-quotes-panel th:nth-child(4) { width:23%; }
+.supplier-quotes-panel th:last-child { width:18%; }
+.supplier-quotes-panel td .actions { flex-wrap:wrap; }
 .workflow-modal .tool-strip > input { max-width:250px; }
 .template-controls, .template-summary, .template-note { margin:16px 24px; }
 .template-controls { display:flex; gap:14px; align-items:center; }

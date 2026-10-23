@@ -135,6 +135,20 @@ def tables(p, q, approved):
               ('审核记录', ['对象类型', '对象 ID', '决定', '复核人', '时间', '依据', '对象哈希'],
                [[r['collection'], r['object_id'], r['decision'], r['reviewer'], r['timestamp'], r['reason'], r['object_hash']] for r in snapshot['reviews']+report_reviews]),
               ('缺项与警示', ['事项'], [[x] for x in ((q['warnings'] if q else [])+(['当前版本已失效；源输入已变更'] if q and q['id'] in p['stale_quotes'] else []))])]
+    offers=snapshot.get('supplier_quotes',[])
+    if offers:
+        result.append(('供应商报价登记',['资源 / 清单','供应商 / 报价单','单价 / 税制 / 地区','期次 / 有效期','供货条件 / 登记依据','状态 / 原始证据'],
+            [[o['target']['resource']['name']+' / '+o['target']['boq_name'],o['supplier']+' / '+o['reference'],
+              o['metadata']['price']+'元/'+o['target']['resource']['unit']+' / '+o['metadata']['tax_mode']+' / '+o['metadata']['region'],
+              o['metadata']['period']+' / '+o['metadata']['valid_from']+' 至 '+o['metadata']['valid_until'],
+              o['terms']+' / '+o['reason'],{'draft':'待复核','approved':'已审定','rejected':'已拒绝','needs_info':'待补件'}.get(o['state'],o['state'])+' / '+o['evidence_id']]
+             for o in offers]))
+    adoptions=snapshot.get('supplier_quote_adoptions',[])
+    if adoptions:
+        result.append(('供应商报价采用',['资源 / 清单','报价及版本校验','采用单价 / 原状态','选择依据','采用人 / 时间','原始证据'],
+            [[x['after']['name']+' / '+next((b['name'] for b in snapshot['boq'] if b['id']==x['boq_id']),x['boq_id']),
+              x['quote_id']+' / '+x['quote_hash'],x['after']['price']+'元/'+x['after']['unit']+' / 原待询价，无原价差额',
+              x['reason'],x['author']+' / '+x['created_at'],x['after']['evidence_id']] for x in adoptions]))
     transcriptions=[e for e in snapshot['evidence'] if e.get('ocr_transcription')]
     if transcriptions:
         result.append(('扫描原行人工抄录',['人工证据 / 来源行','机器原文','人工核对文字','核对依据','核对人 / 时间','原件及位置'],

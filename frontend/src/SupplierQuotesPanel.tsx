@@ -1,0 +1,53 @@
+import React,{useEffect,useRef,useState} from 'react';
+import {createPortal} from 'react-dom';
+type Obj=Record<string,any>;
+const states:Obj={draft:'待复核',approved:'已审定',rejected:'已拒绝',needs_info:'待补件'};
+const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai'}).format(new Date());
+function F({label,children}:any){return <label className="field"><span>{label}</span>{children}</label>}
+export function SupplierOfferDetails({item}: {item:Obj}){
+ const r=item.target.resource,m=item.metadata;
+ return <dl className="review-human">{[
+  ['目标清单与资源',item.target.boq_name+' / '+r.resource_code+' / '+r.name],
+  ['规格、单位与费用归属',r.specification+' / '+r.unit+' / '+r.fee_allocation],
+  ['供应商与报价单',item.supplier+' / '+item.reference],['收到日期',item.received_on],
+  ['完整精度单价',m.price+'元/'+r.unit+' / '+m.tax_mode],['地区与期次',m.region+' / '+m.period],
+  ['报价有效期',m.valid_from+' 至 '+m.valid_until],['供货及付款条件',item.terms],
+  ['价格使用许可',m.license],['登记核对依据',item.reason],['登记人及时间',item.author+' / '+item.created_at],
+  ['原价与计算边界','原资源待询价，无原价差额；不改变消耗量、定额系数或清单数量'],
+ ].map(([k,v])=><div className="review-row" key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+}
+export default function SupplierQuotesPanel({p,user,request,refresh,onReview,sourceLink}: {p:Obj;user:Obj;request:any;refresh:()=>Promise<any>;onReview:any;sourceLink:any}){
+ const base='/projects/'+p.id+'/supplier-quotes',editable=user.role!=='reviewer';
+ const [data,setData]=useState<Obj>({items:[],total:0,offset:0,limit:50}),[filter,setFilter]=useState(''),[dialog,setDialog]=useState<Obj|null>(null),[error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
+ const life=useRef(0),reads=useRef(0);
+ async function load(key=filter,offset=0){const id=++reads.current,g=life.current;const result=await request(base+'?key='+encodeURIComponent(key)+'&offset='+offset);if(g===life.current&&id===reads.current)setData(result)}
+ useEffect(()=>{life.current++;setDialog(null);setFilter('');setError('');setMessage('');setData({items:[],total:0,offset:0,limit:50});return()=>{life.current++;reads.current++}},[p.id]);
+ useEffect(()=>{const g=life.current;load(filter,0).catch((e:any)=>{if(g===life.current)setError(e.message)})},[p.id,p.updated_at]);
+ const pending=(p.pricing_tasks||[]).filter((t:Obj)=>t.kind==='price_inquiry');
+ const targets=[...new Map<string,Obj>([...pending.map((t:Obj)=>[t.key,{key:t.key,name:t.boq_name+' / '+t.resource.name}] as [string,Obj]),...data.items.map((x:Obj)=>[x.offer.target.key,{key:x.offer.target.key,name:x.offer.target.boq_name+' / '+x.offer.target.resource.name}] as [string,Obj])]).values()];
+ const evidences=p.evidence.filter((e:Obj)=>p.documents.some((d:Obj)=>d.id===e.document_id&&!d.superseded));
+ function openRegister(){setError('');setMessage('');setDialog({type:'register',request_id:crypto.randomUUID(),key:'',supplier:'',reference:'',received_on:today(),terms:'',reason:'',price:'',license:'',period:today().slice(0,7),region:p.region,tax_mode:'不含税',valid_from:p.pricing_date||today(),valid_until:'',evidence_id:''})}
+ const update=(k:string,v:any)=>setDialog(d=>({...d,[k]:v}));
+ async function submit(e:React.FormEvent){e.preventDefault();if(!dialog)return;const g=life.current;setBusy(true);setError('');try{
+  if(dialog.type==='register'){
+   const row=pending.find((t:Obj)=>t.key===dialog.key);if(!row)throw Error('请重新选择待询价资源');
+   const {type,...body}=dialog;
+   await request(base,'POST',{...body,boq_hash:row.boq_hash,resource_hash:row.resource_hash});
+  }else await request(base+'/'+dialog.item.offer.id+'/adopt','POST',{object_hash:dialog.item.object_hash,reason:dialog.reason,confirm_conditions:dialog.confirm_conditions});
+  if(g!==life.current)return;
+  setMessage(dialog.type==='register'?'报价已登记，须由独立复核人员核查。':'已补入所选报价；资源消耗量保持，清单须重新复核。');setDialog(null);await refresh();
+ }catch(e:any){if(g===life.current)setError(e.message)}finally{if(g===life.current)setBusy(false)}}
+ async function browse(key:string,offset=0){const g=life.current;setBusy(true);setError('');setFilter(key);try{await load(key,offset)}catch(e:any){if(g===life.current)setError(e.message)}finally{if(g===life.current)setBusy(false)}}
+ return <><section className="card space-top supplier-quotes-panel"><div className="section-head"><div><h2>供应商报价登记与选择</h2><p>为待询价资源登记已收到的报价，核对规格、税制和供货条件后独立复核；选择报价补价后，清单仍须重新审核。</p></div><button className="btn" disabled={!editable||busy||!pending.length} onClick={openRegister}>登记收到的报价</button></div>
+  <F label="查看同一资源的报价"><select value={filter} disabled={busy} onChange={e=>browse(e.target.value)}><option value="">全部登记报价</option>{targets.map(t=><option key={t.key} value={t.key}>{t.name}</option>)}</select></F>
+  <p className="form-note">仅登记已收到的报价，不发送询价或采购订单。不同税制和供货条件不可直接比低价，系统不自动选择最低价。完整精度单价按原报价保留。</p>
+  {data.items.length?<div className="table-wrap"><table><thead><tr><th>清单 / 资源规格</th><th>供应商 / 报价单</th><th>单价 / 税制</th><th>有效期 / 供货条件</th><th>状态与操作</th></tr></thead><tbody>{data.items.map((x:Obj)=>{const o=x.offer,m=o.metadata;return <React.Fragment key={o.id}><tr><td>{o.target.boq_name}<small className="block">{o.target.resource.resource_code} / {o.target.resource.name} / {o.target.resource.specification}</small></td><td>{o.supplier}<small className="block">{o.reference} / 收到 {o.received_on}</small></td><td>{m.price} 元/{o.target.resource.unit}<small className="block">{m.tax_mode} / {m.region} / {m.period}</small></td><td>{m.valid_from} 至 {m.valid_until}<small className="block">{o.terms}</small></td><td>{states[o.state]}{x.adoption&&<b className="block">已有采用记录</b>}<small className="block">{x.issue||'依据及适用期可用'}</small><div className="actions"><button className="text-btn" disabled={busy} onClick={()=>onReview('supplier_quotes',o)}>依据与复核</button><button className="text-btn" disabled={busy||!editable||!x.available} onClick={()=>{setError('');setDialog({type:'adopt',item:x,reason:'',confirm_conditions:false})}}>选择并补价</button></div></td></tr>{x.adoption&&<tr><td colSpan={5}><details><summary>查看采用依据 · {o.supplier} / {o.reference}</summary><p>{x.adoption.reason}</p><small>{x.adoption.author} / {x.adoption.created_at}</small></details></td></tr>}</React.Fragment>})}</tbody></table></div>:<p>暂无登记报价。先在定额资源中明确待询价资源的编码、规格、单位及费用归属，再登记供应商原始报价。</p>}
+  {data.total>data.limit&&<div className="actions"><button className="btn" disabled={busy||!data.offset} onClick={()=>browse(filter,Math.max(0,data.offset-data.limit))}>上一页</button><span>{data.offset+1}—{Math.min(data.offset+data.limit,data.total)} / {data.total}</span><button className="btn" disabled={busy||data.offset+data.limit>=data.total} onClick={()=>browse(filter,data.offset+data.limit)}>下一页</button></div>}
+  {message&&<p role="status">{message}</p>}{error&&!dialog&&<p role="alert" className="error-inline">{error}</p>}
+ </section>{dialog&&createPortal(<div className="overlay" onMouseDown={()=>!busy&&setDialog(null)}><section className="modal wide" role="dialog" aria-modal="true" aria-label={dialog.type==='register'?'登记供应商报价':'选择供应商报价补价'} onMouseDown={e=>e.stopPropagation()}><header><h2>{dialog.type==='register'?'登记收到的供应商报价':'选择供应商报价并补价'}</h2><button type="button" className="icon-btn" disabled={busy} aria-label="关闭供应商报价" onClick={()=>setDialog(null)}>×</button></header><form onSubmit={submit}><div className="modal-body">
+  {dialog.type==='register'?<><F label="待询价的具体资源"><select required value={dialog.key} disabled={busy} onChange={e=>update('key',e.target.value)}><option value="">明确选择清单与资源</option>{pending.map((t:Obj)=><option key={t.key} value={t.key}>{t.boq_name} / {t.resource.resource_code} / {t.resource.name} / {t.resource.specification} / {t.resource.unit}</option>)}</select></F>
+  <div className="form-grid three">{[['supplier','供应商名称'],['reference','报价单编号或名称'],['received_on','收到日期'],['price','原始单价（元）'],['period','价格期次'],['region','适用地区'],['valid_from','有效起日'],['valid_until','有效截至']].map(([k,l])=><F label={l} key={k}><input required disabled={busy} maxLength={2000} type={['received_on','valid_from','valid_until'].includes(k)?'date':'text'} inputMode={k==='price'?'decimal':undefined} value={dialog[k]} onChange={e=>update(k,e.target.value)}/></F>)}<F label="报价税制"><select disabled={busy} value={dialog.tax_mode} onChange={e=>update('tax_mode',e.target.value)}><option>不含税</option><option>含税</option></select></F></div>
+  {['terms','license','reason'].map((k,i)=><F key={k} label={['供货、运输、安装及付款条件','价格使用许可及适用限制','报价与资源规格的核对依据'][i]}><textarea required disabled={busy} rows={3} maxLength={2000} value={dialog[k]} onChange={e=>update(k,e.target.value)}/></F>)}
+  <F label="供应商报价原始依据"><select required disabled={busy} value={dialog.evidence_id} onChange={e=>update('evidence_id',e.target.value)}><option value="">选择已上传报价原件的证据</option>{evidences.map((e:Obj)=><option key={e.id} value={e.id}>{p.documents.find((d:Obj)=>d.id===e.document_id)?.name} · {e.text.slice(0,50)}</option>)}</select></F><p className="form-note">原始报价应明确对应选定资源的规格和单位，不能把整包总价直接当资源单价。登记只形成待复核记录，不补价、不改变任务状态。</p></>:<><SupplierOfferDetails item={dialog.item.offer}/>{sourceLink(dialog.item.offer.evidence_id)}<p className="form-note">此操作仅补齐原待询价资源的单价及价格依据，不产生原价差额。其他报价保留，当前清单须重新审核，旧报价快照保持原样。</p><label className="check-option"><input type="checkbox" required disabled={busy} checked={dialog.confirm_conditions} onChange={e=>update('confirm_conditions',e.target.checked)}/>已核对资源规格、单位、税制、供货条件、许可及合同适用性</label><F label="选择此报价的依据"><textarea required rows={4} maxLength={2000} disabled={busy} value={dialog.reason} onChange={e=>update('reason',e.target.value)}/></F></>}
+  {error&&<p role="alert" className="error-inline">{error}</p>}</div><footer><button className="btn" type="button" disabled={busy} onClick={()=>setDialog(null)}>取消</button><button className="btn primary" disabled={busy}>{busy?'保存中…':dialog.type==='register'?'登记为待复核报价':'采用并补价，重新送审清单'}</button></footer></form></section></div>,document.body)}</>
+}
