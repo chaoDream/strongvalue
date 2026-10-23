@@ -2,11 +2,11 @@
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import HTTPException
 from . import store
-from .compound_takeoff import component_quantity, structured_validator, op, text
+from .compound_takeoff import component_quantity, structured_validator, STRUCTURED_KINDS, op, text
 from .engine import DomainError, number, precise, quantity_number
 
-EXCAVATION_KINDS = {'trench','station_trench','spatial_regions','planar_regions','compound'}
-OCCUPATION_KINDS = {'chamber_plate','circular_chamber','route_bedding','pipe_envelope','slab','walls','masonry','ring','spatial_regions','planar_regions','compound'}
+EXCAVATION_KINDS = {'trench','station_trench','spatial_regions','planar_regions','polygon_region','compound'}
+OCCUPATION_KINDS = {'chamber_plate','circular_chamber','route_bedding','pipe_envelope','slab','walls','masonry','ring','spatial_regions','planar_regions','polygon_region','compound'}
 VERSION = 'reviewed-volume-balance-1.0'
 NOTICE = '按当前已审构件体积及核定比例建立回填平衡，不推断实体是否位于开挖内或相互重叠。须确认同一计量范围及扣减不重复。采用来源已审工程量（含来源既定修约），不还原未修约量，不自动推算管道外包体积、压实/松方系数、分层做法或运输。'
 
@@ -39,7 +39,7 @@ def source_component(p, cid, excavation=False):
     allowed = EXCAVATION_KINDS if excavation else OCCUPATION_KINDS
     if s['kind'] not in allowed or s['state'] != 'approved':
         raise HTTPException(409,'须选择当前已审定且适用于'+('开挖' if excavation else '实体占位')+'的体积构件')
-    if s['kind'] in ('chamber_plate','circular_chamber','route_bedding','pipe_envelope','station_trench','spatial_regions','planar_regions','compound'):
+    if s['kind'] in STRUCTURED_KINDS:
         structured_validator(s['kind'])(p,s,saved=True)
     if s['kind']=='circular_chamber' and s.get('purpose')!='outer_envelope':
         raise HTTPException(409,'井筒材料体积不能代替回填占位，请另建并审定井筒外包体积')
