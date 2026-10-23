@@ -387,7 +387,7 @@ def tables(p, q, approved):
         if intersections:
             result.append(('空间相交定位', ['构件', '加扣', '长方体A', '长方体B', '两两相交体积（m³）', '说明'], intersections))
     def material_proofs(item):
-        labels={'quantity':'每组数量','unit_weight':'每米质量','cut_length':'下料长度','measurement_basis':'说明'}
+        labels={'quantity':'每组数量','unit_weight':'单位质量','length':'展开长度','width':'展开宽度','x':'X起距','y':'Y起距','cut_length':'下料长度','measurement_basis':'说明'}
         grouped={}
         for key,eid in item['evidence'].items():grouped.setdefault(eid,[]).append(labels[key])
         return '\n'.join('、'.join(names)+'：'+eid for eid,names in grouped.items())
@@ -398,11 +398,19 @@ def tables(p, q, approved):
                        [[t['name'],label,str(t['material_summary'][key])] for t in materials for key,label in labels.items()]+
                        [[t['name'],key,value] for t in materials for key,value in [('来源',t['material_summary']['source_name']+' / V'+str(t['material_summary']['source_revision'])),('材料类别',t['material']),('计长口径',t['material_summary']['source_length_basis']),('工程量',t['quantity']+' kg'),('计量依据',t['measurement_basis']),('算法及精度',t['rule_version']+'；'+t['rounding_rule']),('适用边界',t['notice'])]]))
         result.append(('栏杆材料逐项计算',['材料表 / 项目','类型 / 每组数量','单道或单件长度（m）','每米质量（kg/m）','单组线材总长（m）','单组质量（kg）','说明及依据'],
-                       [[t['name']+' / '+v['name'],('连续道数' if v['mode']=='continuous' else '定长件数')+' / '+v['normalized_quantity'],v['single_member_length'],v['normalized_unit_weight'],v['single_group_stock_length'],v['single_group_mass'],v['measurement_basis']+'；'+material_proofs(v)] for t in materials for v in t['material_items']]))
+                       [[t['name']+' / '+v['name'],('连续道数' if v['mode']=='continuous' else '定长件数')+' / '+v['normalized_quantity'],v['single_member_length'],v['normalized_unit_weight'],v['single_group_stock_length'],v['single_group_mass'],v['measurement_basis']+'；'+material_proofs(v)] for t in materials for v in t['material_items'] if v['mode']!='rect_panels']))
         result.append(('栏杆材料原始参数',['材料表 / 项目','每组道数或件数','每米质量原值及单位','单件下料原值及单位','逐参数依据'],
-                       [[t['name']+' / '+v['name'],str(v['quantity']),str(v['unit_weight'])+' '+v['weight_unit'],str(v['cut_length'])+' '+v['length_unit'] if v['mode']=='cut_pieces' else '采用来源单组未修约计入长度',material_proofs(v)] for t in materials for v in t['material_items']]))
+                       [[t['name']+' / '+v['name'],str(v['quantity']),str(v['unit_weight'])+' '+v['weight_unit'],str(v['cut_length'])+' '+v['length_unit'] if v['mode']=='cut_pieces' else '采用来源单组未修约计入长度',material_proofs(v)] for t in materials for v in t['material_items'] if v['mode']!='rect_panels']))
         result.append(('栏杆材料计长来源',['材料表 / 来源原段','原边或原段 / 决定','来源计入长（m）','局部区间（m）','范围说明及依据'],
                        [[t['name']+' / '+('S'+str(e['edge_index']) if e['role']=='route' else 'R'+str(e['ring_index'])+' E'+str(e['edge_index'])),('设计线段' if e['role']=='route' else '外轮廓' if e['role']=='outer' else '孔')+' / '+{'exclude':'排除','full':'整段','ranges':'局部区间'}[e['mode']],e['selected_length'],'；'.join(v['s_from']+'→'+v['s_to'] for v in e['normalized_ranges']) if e['mode']=='ranges' else '整段' if e['mode']=='full' else '无计入',e['basis']+'；'+e['evidence_id']] for t in materials for e in t['source_railing']['railing_edges']]))
+    panels=[(t,v) for t in materials for v in t['material_items'] if v['mode']=='rect_panels']
+    if panels:
+        result.append(('板网片净面积与质量',['材料表 / 板网片','外矩形 / 开口并集（m²）','开口直加 / 消除重复（m²）','单片净面积（m²）','每组片数 / 净面积（m²）','面密度（kg/m²）','单组质量（kg）','口径及逐项依据'],
+                       [[t['name']+' / '+v['name'],v['panel_geometry']['gross']+' / '+v['panel_geometry']['deduction'],v['panel_geometry']['planar_summary']['naive_deduct_area']+' / '+v['panel_geometry']['planar_summary']['deduct_overlap_area'],v['single_panel_net_area'],v['normalized_quantity']+' / '+v['single_group_net_area'],v['normalized_unit_weight'],v['single_group_mass'],v['measurement_basis']+'；'+material_proofs(v)] for t,v in panels]))
+        result.append(('板网片原始尺寸与开口',['材料表 / 板网片 / 区域','加扣','原始XY / 长宽','原始单位','原始面密度 / 每组片数','局部坐标口径及区域说明','逐参数依据'],
+                       [[t['name']+' / '+v['name']+' / '+a['name'],'外矩形' if a['operation']=='add' else '扣开口',str(a['parameters']['x'])+' / '+str(a['parameters']['y'])+' / '+str(a['parameters']['length'])+' / '+str(a['parameters']['width']),a['unit'],str(v['unit_weight'])+' '+v['weight_unit']+' / '+str(v['quantity']),v['panel_geometry']['coordinate_basis']+'；'+a['measurement_basis'],material_proofs(a)] for t,v in panels for a in v['panel_geometry']['planar_regions']]))
+        result.append(('板网片面积分条闭合',['材料表 / 板网片','X起终（m）','条宽（m）','外轮廓Y区间（m）','扣开口Y并集（m）','条带净面积（m²）'],
+                       [[t['name']+' / '+v['name'],a['x_from']+' → '+a['x_to'],a['width'],json.dumps(a['add_intervals']),json.dumps(a['deduct_intervals']),a['net_area']] for t,v in panels for a in v['panel_geometry']['planar_strips']]))
     def railing_edge_label(e):
         return 'S'+str(e['edge_index']) if e['role']=='route' else 'R'+str(e['ring_index'])+' E'+str(e['edge_index'])
     railings = [t for t in snapshot['takeoffs'] if t.get('railing_summary')]
