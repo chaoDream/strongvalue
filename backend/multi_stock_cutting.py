@@ -13,7 +13,7 @@ NOTICE='仅对本组已据原件确认可按需供应、同材质同截面的2�
 def choices(config,stock,stock_ast,trim,unit,prefix,dimensions,refs,conversions):
     c=config
     limited=isinstance(c,dict) and 'supply_limits' in c
-    if not isinstance(c,dict) or set(c)-({'supply_limits','processing'}&set(c))!={'alternatives','supply_confirmed','measurement_basis','evidence_id'}:raise DomainError('多定尺须填写备选长度、按需供应确认、供应与选择口径说明及原件')
+    if not isinstance(c,dict) or set(c)-({'supply_limits','processing','kerfs'}&set(c))!={'alternatives','supply_confirmed','measurement_basis','evidence_id'}:raise DomainError('多定尺须填写备选长度、按需供应确认、供应与选择口径说明及原件')
     if limited and c['supply_confirmed'] is not False:raise DomainError('有限供应不能同时确认不限量按需供应，请明确选择供应口径')
     if not limited and c['supply_confirmed'] is not True:raise DomainError('须据原件确认各定尺同规格且可按需供应；限量库存不得用此模式')
     text(c['measurement_basis'],'多定尺供应与选择口径说明');refs[prefix+'.supply_basis']=text(c['evidence_id'],'多定尺供应口径原件',200)

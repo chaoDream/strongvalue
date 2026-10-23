@@ -446,7 +446,7 @@ def tables(p, q, approved):
         result.append(('混合下料长度质量',['材料表 / 混排组','全部重复后组成','长度（m）','质量（kg）'],
                        [[t['name']+' / '+g['name'],label,g['total'][key+'_length'],g['total'][key+'_mass']] for t,g in mixed_rows for key,label in mixed_labels.items()]))
         result.append(('混合下料依据与边界',['材料表 / 混排组','兼容与下料依据、搜索结论及适用范围'],
-                       [[t['name']+' / '+g['name'],mixed_status[g['proof']['status']]+'；'+mixed_proof(g)+'；已确认同材质同截面、单件下料完整及锯缝切除未重复；'+g['material_basis']+'；'+g['measurement_basis']+'；'+'；'.join(('S1 ' if g.get('stock_selection',{}).get('processing_independent') and key in ('trim_start','trim_end','reusable_min_length') else '')+label+(' '+str(g[key])+g['length_unit'] if key in ('stock_length','kerf_per_piece','trim_start','trim_end','reusable_min_length') else '')+' 原件：'+g['evidence'][key] for key,label in mixed_params.items())+'；长度平衡差额'+g['balance_difference']+'m；'+g['notice']+'；'+g['rule_version']] for t,g in mixed_rows]))
+                       [[t['name']+' / '+g['name'],mixed_status[g['proof']['status']]+'；'+mixed_proof(g)+'；已确认同材质同截面、单件下料完整及锯缝切除未重复；'+g['material_basis']+'；'+g['measurement_basis']+'；'+'；'.join(('S1 ' if (g.get('stock_selection',{}).get('processing_independent') and key in ('trim_start','trim_end','reusable_min_length') or g.get('stock_selection',{}).get('kerf_independent') and key=='kerf_per_piece') else '')+label+(' '+str(g[key])+g['length_unit'] if key in ('stock_length','kerf_per_piece','trim_start','trim_end','reusable_min_length') else '')+' 原件：'+g['evidence'][key] for key,label in mixed_params.items())+'；长度平衡差额'+g['balance_difference']+'m；'+g['notice']+'；'+g['rule_version']] for t,g in mixed_rows]))
     multi_rows=[(t,g,o) for t,g in mixed_rows for o in g.get('stock_selection',{}).get('options',[])]
     if multi_rows:
         result.append(('多定尺候选与选用',['材料表 / 混排组','候选编号','定尺（m）','选用根数','定尺原件','目标 / 供应依据'],
@@ -460,7 +460,13 @@ def tables(p, q, approved):
         result.append(('逐规格加工参数',['材料表 / 混排组 / 规格','起端 / 终端切除（m）','实际可用长（m）','留用下限（m）','逐参数原件'],
                        [[t['name']+' / '+g['name']+' / S'+str(o['index'])+' '+o['stock_length']+'m',o['processing']['trim_start']+' / '+o['processing']['trim_end'],o['processing']['usable_length'],o['processing']['reusable_min_length'],'；'.join(label+'：'+(g['evidence'] if o['index']==1 else g['stock_choices']['processing']['alternatives'][o['index']-2]['evidence'])[key] for key,label in [('trim_start','起端'),('trim_end','终端'),('reusable_min_length','留用下限')])] for t,g,o in processing_rows]))
         result.append(('逐规格加工范围依据',['材料表 / 混排组','范围、确认及原件'],
-                       [[t['name']+' / '+g['name'],'已确认S1沿用本组、备选逐规格核定、每件统一锯缝且端切不重复；'+g['stock_choices']['processing']['measurement_basis']+' 原件：'+g['stock_choices']['processing']['evidence_id']+'；'+g['notice']] for t,g in mixed_rows if g.get('stock_selection',{}).get('processing_independent')]))
+                       [[t['name']+' / '+g['name'],('已确认S1沿用本组、备选逐规格核定、每件锯缝以逐规格锯缝表为准且端切不重复；' if g.get('stock_selection',{}).get('kerf_independent') else '已确认S1沿用本组、备选逐规格核定、每件统一锯缝且端切不重复；')+g['stock_choices']['processing']['measurement_basis']+' 原件：'+g['stock_choices']['processing']['evidence_id']+'；'+g['notice']] for t,g in mixed_rows if g.get('stock_selection',{}).get('processing_independent')]))
+    kerf_rows=[(t,g,o) for t,g,o in multi_rows if g['stock_selection'].get('kerf_independent')]
+    if kerf_rows:
+        result.append(('逐规格每件锯缝',['材料表 / 混排组','规格 / 定尺（m）','每件锯缝（m）','锯缝原件'],
+                       [[t['name']+' / '+g['name'],'S'+str(o['index'])+' / '+o['stock_length'],o['kerf']['kerf_per_piece'],g['evidence']['kerf_per_piece'] if o['index']==1 else g['stock_choices']['kerfs']['alternatives'][o['index']-2]['evidence_id']] for t,g,o in kerf_rows]))
+        result.append(('逐规格锯缝范围依据',['材料表 / 混排组','范围、确认及原件'],
+                       [[t['name']+' / '+g['name'],'已确认S1沿用本组、S2起锯缝逐规格核定，每件含最后一件，未重复计入净下料或端切；本表优先于通用锯缝说明；'+g['stock_choices']['kerfs']['measurement_basis']+' 原件：'+g['stock_choices']['kerfs']['evidence_id']+'；'+g['notice']] for t,g in mixed_rows if g.get('stock_selection',{}).get('kerf_independent')]))
     panels=[(t,v) for t in materials for v in t['material_items'] if v['mode']=='rect_panels']
     if panels:
         result.append(('板网片净面积与质量',['材料表 / 板网片','外矩形 / 开口并集（m²）','开口直加 / 消除重复（m²）','单片净面积（m²）','每组片数 / 净面积（m²）','面密度（kg/m²）','单组质量（kg）','口径及逐项依据'],

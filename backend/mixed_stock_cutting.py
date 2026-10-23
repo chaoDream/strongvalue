@@ -79,40 +79,46 @@ def calculate(configs,rows,groups):
             from . import multi_stock_cutting as multi_cut
             options=multi_cut.choices(c['stock_choices'],stock,asts['stock_length'],trim,c['length_unit'],prefix,dimensions,refs,conversions)
         for o in options:
-            o.update({k:normalized[k] for k in ('trim_start','trim_end','reusable_min_length')});o['processing_asts']={k:asts[k] for k in ('trim_start','trim_end','reusable_min_length')}
+            o.update({k:normalized[k] for k in ('trim_start','trim_end','reusable_min_length')});o['processing_asts']={k:asts[k] for k in ('trim_start','trim_end','reusable_min_length')};o.update(kerf_per_piece=kerf,kerf_ast=asts['kerf_per_piece'])
         independent=multi and 'processing' in c['stock_choices']
         if independent:
             from . import stock_processing as processing
             processing.apply(c['stock_choices']['processing'],options,c['length_unit'],prefix,dimensions,refs,conversions)
+        independent_kerf=multi and 'kerfs' in c['stock_choices']
+        if independent_kerf:
+            from . import stock_kerf
+            stock_kerf.apply(c['stock_choices']['kerfs'],options,c['length_unit'],prefix,dimensions,refs,conversions)
         pieces=[];demands=[]
         for r in selected:
             n=Fraction(r['normalized_quantity'])*Fraction(groups);cut=Fraction(r['single_member_length'])
             if n.denominator!=1 or not 1<=n<=200:raise DomainError('混排各项全部重复后件数须为1至200整数')
-            if cut+kerf>max(o['length']-o['trim_start']-o['trim_end'] for o in options):raise DomainError(r['name']+' 单件下料加锯缝超出混排原材可用长')
+            if not any(cut+o['kerf_per_piece']<=o['length']-o['trim_start']-o['trim_end'] for o in options):raise DomainError(r['name']+' 单件下料加锯缝超出混排原材可用长')
             demands.append(dict(item_index=r['index'],name=r['name'],piece_count=int(n),cut_length=dec(cut),count_formula_ast=op('multiply',r['formula_ast']['args'][1],{'dimension':'multiplicity'})))
             pieces.extend(dict(item_index=r['index'],name=r['name'],piece_index=j,cut=cut,pitch=cut+kerf,ast=r['formula_ast']['args'][0]) for j in range(1,int(n)+1))
         piece_total+=len(pieces)
         if len(pieces)>200 or piece_total>400:raise DomainError('每组混排最多200件，全表最多400件，请按实际范围拆分')
         pieces.sort(key=lambda p:(-p['pitch'],p['item_index'],p['piece_index']))
-        if multi and any(o['length']-o['trim_start']-o['trim_end']<min(p['pitch'] for p in pieces) for o in options):raise DomainError('每种候选定尺至少须能下料一件所选材料')
-        scale=lcm(trim.denominator,*[(o['trim_start']+o['trim_end']).denominator for o in options],*[o['length'].denominator for o in options],*[p['pitch'].denominator for p in pieces]);sizes=[int(p['pitch']*scale) for p in pieces]
-        if multi:
+        if multi and any(o['length']-o['trim_start']-o['trim_end']<min(p['cut']+o['kerf_per_piece'] for p in pieces) for o in options):raise DomainError('每种候选定尺至少须能下料一件所选材料')
+        scale=lcm(trim.denominator,*[(o['trim_start']+o['trim_end']).denominator for o in options],*[o['length'].denominator for o in options],*[p['pitch'].denominator for p in pieces],*[o['kerf_per_piece'].denominator for o in options],*[p['cut'].denominator for p in pieces]);sizes=[int(p['pitch']*scale) for p in pieces]
+        if independent_kerf:
+            packed,proof=stock_kerf.pack([int(p['cut']*scale) for p in pieces],[int(o['length']*scale) for o in options],[int((o['trim_start']+o['trim_end'])*scale) for o in options],[int(o['kerf_per_piece']*scale) for o in options],limits=[o['supply_limit'] for o in options] if 'supply_limit' in options[0] else None,limit=SEARCH_LIMIT);proof=multi_cut.proof_lengths(proof,scale)
+        elif multi:
             packed,proof=multi_cut.pack(sizes,[int(o['length']*scale) for o in options],([int((o['trim_start']+o['trim_end'])*scale) for o in options] if independent else int(trim*scale)),limit=SEARCH_LIMIT,limits=[o['supply_limit'] for o in options] if 'supply_limit' in options[0] else None);proof=multi_cut.proof_lengths(proof,scale)
         else:
             packed,proof=pack(sizes,int(usable*scale),limit=SEARCH_LIMIT);packed=[(0,indices) for indices in packed]
         values={k:Fraction(0) for k in LEDGER};formulas={k:[] for k in LEDGER};bars=[]
         for bi,(choice,indices) in enumerate(packed,1):
-            chosen=options[choice];stock=chosen['length'];stock_ast=chosen['ast'];trim=chosen['trim_start']+chosen['trim_end'];usable=stock-trim
-            ps=[pieces[j] for j in indices];net=sum((p['cut'] for p in ps),Fraction(0));kerf_total=len(ps)*kerf;offcut=usable-net-kerf_total
+            chosen=options[choice];stock=chosen['length'];stock_ast=chosen['ast'];trim=chosen['trim_start']+chosen['trim_end'];usable=stock-trim;bar_kerf=chosen['kerf_per_piece']
+            ps=[pieces[j] for j in indices];net=sum((p['cut'] for p in ps),Fraction(0));kerf_total=len(ps)*bar_kerf;offcut=usable-net-kerf_total
             disposition='none' if offcut==0 else 'retain' if offcut>=chosen['reusable_min_length'] else 'scrap'
             v=dict(net_length=net,kerf_length=kerf_total,trim_length=trim,scrap_length=offcut if disposition=='scrap' else Fraction(0),retained_length=offcut if disposition=='retain' else Fraction(0),purchased_length=stock)
             v['loss_length']=v['kerf_length']+v['trim_length']+v['scrap_length']
-            net_ast=op('add',*[p['ast'] for p in ps]);kerf_ast=op('multiply',asts['kerf_per_piece'],{'constant':str(len(ps))});trim_ast=op('add',chosen['processing_asts']['trim_start'],chosen['processing_asts']['trim_end']);off_ast=op('subtract',stock_ast,op('add',net_ast,kerf_ast,trim_ast))
+            net_ast=op('add',*[p['ast'] for p in ps]);kerf_ast=op('multiply',chosen['kerf_ast'],{'constant':str(len(ps))});trim_ast=op('add',chosen['processing_asts']['trim_start'],chosen['processing_asts']['trim_end']);off_ast=op('subtract',stock_ast,op('add',net_ast,kerf_ast,trim_ast))
             fa=dict(net_length=net_ast,kerf_length=kerf_ast,trim_length=trim_ast,scrap_length=off_ast if disposition=='scrap' else {'constant':'0'},retained_length=off_ast if disposition=='retain' else {'constant':'0'},purchased_length=stock_ast);fa['loss_length']=op('add',kerf_ast,trim_ast,fa['scrap_length'])
             position=chosen['trim_start'];segments=[]
             for p in ps:
-                segments.append(dict(item_index=p['item_index'],name=p['name'],piece_index=p['piece_index'],from_s=dec(position),to_s=dec(position+p['cut']),kerf_to_s=dec(position+p['pitch']),cut_length=dec(p['cut'])))
-                position+=p['pitch']
+                segments.append(dict(item_index=p['item_index'],name=p['name'],piece_index=p['piece_index'],from_s=dec(position),to_s=dec(position+p['cut']),kerf_to_s=dec(position+p['cut']+bar_kerf),cut_length=dec(p['cut'])))
+                position+=p['cut']+bar_kerf
             for k in LEDGER:values[k]+=v[k];formulas[k].append(fa[k])
             bars.append(dict(index=bi,piece_count=len(ps),pieces=segments,offcut_length=dec(offcut),offcut_disposition=disposition,values={k:dec(x) for k,x in v.items()},formula_asts=fa))
             if multi:bars[-1]['stock_choice_index']=options[choice]['index']
@@ -133,7 +139,12 @@ def calculate(configs,rows,groups):
                 out[-1]['stock_selection']['processing_independent']=True
                 for o,n in zip(out[-1]['stock_selection']['options'],options):o['processing']=processing.describe(n)
                 out[-1]['proof']['processing_model']='per_stock_end_trims';out[-1].update(rule_version=processing.VERSION,notice=processing.NOTICE)
+            if independent_kerf:
+                out[-1]['stock_selection']['kerf_independent']=True
+                for o,n in zip(out[-1]['stock_selection']['options'],options):o['kerf']=dict(kerf_per_piece=dec(n['kerf_per_piece']),formula_ast=n['kerf_ast'])
+                out[-1].update(rule_version=stock_kerf.VERSION,notice=stock_kerf.NOTICE)
+    kerf_table=any(g.get('stock_selection',{}).get('kerf_independent') for g in out)
     processing_table=any(g.get('stock_selection',{}).get('processing_independent') for g in out)
     limited_table=any(g.get('stock_selection',{}).get('supply_limited') for g in out)
     multi_table=any('stock_selection' in g for g in out)
-    return dict(groups=out,covered_item_count=len(occupied),uncovered_item_count=len(rows)-len(occupied),stock_count=sum(g['stock_count'] for g in out),total={k:str(quantity_number(sum((Decimal(g['total'][k]) for g in out),Decimal(0)))) for k in out[0]['total']},total_formula_asts={k:op('add',*[g['total_formula_asts'][k] for g in out]) for k in out[0]['total']},dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,rule_version=processing.VERSION if processing_table else LIMITED_VERSION if limited_table else multi_cut.VERSION if multi_table else VERSION,notice=processing.NOTICE if processing_table else LIMITED_NOTICE if limited_table else multi_cut.NOTICE if multi_table else NOTICE)
+    return dict(groups=out,covered_item_count=len(occupied),uncovered_item_count=len(rows)-len(occupied),stock_count=sum(g['stock_count'] for g in out),total={k:str(quantity_number(sum((Decimal(g['total'][k]) for g in out),Decimal(0)))) for k in out[0]['total']},total_formula_asts={k:op('add',*[g['total_formula_asts'][k] for g in out]) for k in out[0]['total']},dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,rule_version=stock_kerf.VERSION if kerf_table else processing.VERSION if processing_table else LIMITED_VERSION if limited_table else multi_cut.VERSION if multi_table else VERSION,notice=stock_kerf.NOTICE if kerf_table else processing.NOTICE if processing_table else LIMITED_NOTICE if limited_table else multi_cut.NOTICE if multi_table else NOTICE)
