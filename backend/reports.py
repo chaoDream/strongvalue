@@ -429,9 +429,23 @@ def tables(p, q, approved):
     if cap_checks:
         result.append(('净面窗口分区校验', ['构件','原面','计量/零窗口','原面积（m²）','子区合计（m²）','精度差（m²）','校验说明'], cap_checks))
         result.append(('净面窗口逐孔扣减', ['构件 / 净区','共同XY窗口 / 局部Z','原轮廓','窗口内面积（m²）','净区面积（m²）','算法'],
-                       [[t['name']+' / F'+str(f['index']), f['position'], 'R'+str(c['ring_index'])+(' 外轮廓' if c['role']=='outer' else ' 孔'),
+                       [[t['name']+' / F'+str(f['index']), f['position'], ('派生' if f.get('cap_component_rings') else '')+'R'+str(c['ring_index'])+(' 外轮廓' if c['role']=='outer' else ' 孔'),
                          c['area'], f['area'], f['cap_clip_rule']]
                         for t in snapshot['takeoffs'] for f in t.get('surface_faces',[]) if f.get('cap_clip_rule') for c in f['cap_clip_rings']]))
+    components = [(t,c) for t in snapshot['takeoffs'] for c in t.get('surface_cap_component_checks',[])]
+    if components:
+        result.append(('净块分离与闭合校验', ['构件 / 原面 / 裁剪区','独立块数','原区净量（m²）','块合计（m²）','显示精度差（m²）','说明'],
+                       [[t['name']+' / 原F'+str(c['parent_index'])+' / 区'+str(c['clip_index']),c['component_count'],c['clip_area'],c['components_area'],c['area_difference'],
+                         '原裁剪区内各净块精确有理数面积闭合；不调平某块，不重复乘来源数量'] for t,c in components]))
+        result.append(('独立净块派生边界', ['构件 / 净块','派生轮廓 / 顶点','XY坐标（m，80位显示）','派生轮廓面积（m²）','净块面积（m²）','说明'],
+                       [[t['name']+' / F'+str(f['index'])+' / 块'+str(f['cap_component_index']),
+                         '派生R'+str(r['ring_index'])+(' 外' if r['role']=='outer' else ' 孔')+' / P'+str(i),
+                         '('+p['x']+', '+p['y']+')',r['area'],f['area'],'实际净块边界；首尾闭合。派生点不是原图点号，精确分数见JSON']
+                        for t in snapshot['takeoffs'] for f in t.get('surface_faces',[]) for r in f.get('cap_component_rings',[]) for i,p in enumerate(r['points'],1)]))
+        result.append(('分离前原区逐孔扣减', ['构件 / 原面 / 裁剪区','原始轮廓','裁剪面积（m²）','原区净量（m²）','原分割算法','范围'],
+                       [[t['name']+' / 原F'+str(c['parent_index'])+' / 区'+str(c['clip_index']),
+                         '原R'+str(r['ring_index'])+(' 外轮廓' if r['role']=='outer' else ' 孔'),r['area'],c['area'],c['cap_clip_rule'],c['position']]
+                        for t in snapshot['takeoffs'] for c in t.get('surface_cap_clip_sources',[]) for r in c['cap_clip_rings']]))
     line_cuts = [(t, line) for t in snapshot['takeoffs'] for line in t.get('surface_partition_lines', [])]
     if line_cuts:
         result.append(('净面斜线分割依据', ['构件 / 原面 / 斜线', '两点原始坐标 / 单位', '逐坐标依据', '规范式（X/Y单位m）', '分割做法 / 原始依据', '规则'],

@@ -112,7 +112,7 @@ def candidates(p, cid):
     result = boundary(source)
     notice=source_notice(source)
     if source['kind']=='polygon_region':
-        from .polygon_line_partitions import NOTICE as notice
+        from .polygon_connected_partitions import CANDIDATE_NOTICE as notice
     base_faces=result['faces']
     if source['kind']=='polygon_region':
         from .polygon_cap_partitions import editor_faces
@@ -129,7 +129,7 @@ def partition(source, subdivisions):
     if not subdivisions:
         return result
     if source['kind'] == 'polygon_region':
-        from .polygon_line_partitions import partition as partition_sides
+        from .polygon_connected_partitions import partition as partition_sides
         return partition_sides(source, subdivisions, result)
     originals = {f['face_id']: f for f in result['faces']}
     by_id, records, faces = {}, [], []
@@ -204,7 +204,7 @@ def partition_candidates(p, body):
     check_sources(p, result['source_evidence'])
     notice=source_notice(source)
     if source['kind']=='polygon_region':
-        from .polygon_line_partitions import NOTICE as notice
+        from .polygon_connected_partitions import CANDIDATE_NOTICE as notice
     base_faces=boundary(source)['faces']
     if source['kind']=='polygon_region':
         from .polygon_cap_partitions import editor_faces
@@ -275,6 +275,10 @@ def calculate(comp, source=None):
         if result.get('surface_partition_lines'):
             from .polygon_line_partitions import VERSION as line_version, ROUNDING as line_rounding, NOTICE as line_notice
             output.update(surface_partition_lines=result['surface_partition_lines'], rule_version=line_version, rounding_rule=line_rounding, notice=line_notice)
+        if result.get('surface_cap_component_checks'):
+            from .polygon_connected_partitions import VERSION as connected_version, ROUNDING as connected_rounding, NOTICE as connected_notice
+            output.update(surface_cap_component_checks=result['surface_cap_component_checks'],surface_cap_clip_sources=result['surface_cap_clip_sources'],
+                          rule_version=connected_version,rounding_rule=connected_rounding,notice=connected_notice)
     return output
 
 
