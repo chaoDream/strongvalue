@@ -175,6 +175,13 @@ def calculate(comp,source=None):
         output['cutting_summary']={'item_count':len(selected),'unplanned_item_count':len(items)-len(selected),'stock_count':sum(v['stock_count'] for v in selected),'required_piece_count':sum(v['required_piece_count'] for v in selected),'total_formula_asts':{k:op('add',*[v['total_formula_asts'][k] for v in selected]) for k in selected[0]['total']},'total':{k:str(quantity_number(sum((Decimal(v['total'][k]) for v in selected),Decimal(0)))) for k in selected[0]['total']},'notice':'仅汇总已启用定尺下料的材料项；未启用项不编此表，不跨材料混排或自动入库，不增加净工程量或报价。'}
         output['rule_version']='railing-material-mass-1.13'
         output['notice']=CUTTING_NOTICE+'；'+output['notice']
+    if 'mixed_cutting' in comp:
+        from .mixed_stock_cutting import calculate as mixed_quantity
+        mixed=mixed_quantity(comp['mixed_cutting'],rows,groups)
+        dimensions.update(mixed['dimensions']);refs.update(mixed['source_evidence']);conversions.extend(mixed['unit_conversions'])
+        output['mixed_stock_cutting']=mixed
+        output['rule_version']='railing-material-mass-1.14'
+        output['notice']=mixed['notice']+'；'+output['notice']
     return output
 
 
