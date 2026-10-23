@@ -1,50 +1,37 @@
 """Explicit ordered assembly of source DXF paths; no snapping or inferred topology."""
 import copy
 from decimal import Decimal
-from typing import Annotated
 from fastapi import HTTPException
-from pydantic import BaseModel,ConfigDict,Field,StringConstraints
+from pydantic import BaseModel,ConfigDict,Field
 from . import store
+from .dxf_selection import AssemblyPart
+from .dxf_fragments import fragment,overlaps
 from .dxf_geometry import route_body
 from .route_takeoff import calculate
 
 VERSION='dxf-wcs-assembly-1.0'
-Hash=Annotated[str,StringConstraints(strict=True,pattern=r'^[a-f0-9]{64}$')]
-
-
-class SourcePart(BaseModel):
-    model_config=ConfigDict(extra='forbid')
-    candidate_id:Annotated[str,StringConstraints(strict=True,pattern=r'^[a-f0-9]{32}$')]
-    object_hash:Hash
-    reverse:bool=Field(strict=True)
+RANGE_VERSION='dxf-wcs-assembly-1.1'
 
 
 class AssemblyIn(BaseModel):
     model_config=ConfigDict(extra='forbid')
-    segments:list[SourcePart]=Field(min_length=2,max_length=20)
-
-
-def source_ids(candidate):
-    try:
-        result={x['id'] for x in candidate['source_objects']} if candidate.get('kind')=='ASSEMBLY' else {candidate['id']}
-        if not result or any(not isinstance(x,str) or not x for x in result):raise ValueError()
-        return result
-    except (AttributeError,KeyError,TypeError,ValueError):raise HTTPException(409,'已有CAD采用来源不完整，请先核对原管线记录') from None
+    segments:list[AssemblyPart]=Field(min_length=2,max_length=20)
 
 
 def assemble(items,segments):
     selected=AssemblyIn.model_validate({'segments':segments}).model_dump()['segments']
-    ids=[s['candidate_id'] for s in selected]
-    if len(ids)!=len(set(ids)):raise HTTPException(422,'同一CAD原对象不能在序列中重复使用，反向重复也不允许')
     sources=[];points=[];ranges=[];joins=[]
     by_id={r['id']:r for r in items}
     for index,part in enumerate(selected):
-        row=by_id.get(part['candidate_id'])
-        if not row or store.digest(row)!=part['object_hash']:raise HTTPException(409,'组装的CAD对象、原件或解析任务已变化，请重新读取')
+        if 'from_point' in part:row=fragment(items,part)
+        else:
+            row=by_id.get(part['candidate_id'])
+            if not row or store.digest(row)!=part['object_hash']:raise HTTPException(409,'组装的CAD对象、原件或解析任务已变化，请重新读取')
         if not row['eligible']:raise HTTPException(422,'原对象 '+row['handle']+' 不能组装：'+row['issue'])
+        if any(overlaps(source,row) for source in sources):raise HTTPException(422,'组装序列重复使用了CAD原始管段；共用端点允许，重叠范围或反向重复不允许')
         if sources and (row['document_id']!=sources[0]['document_id'] or row['unit']!=sources[0]['unit']):
             raise HTTPException(422,'组装只允许同一DXF原件与同一声明单位')
-        oriented=list(reversed(row['points'])) if part['reverse'] else row['points']
+        oriented=row['points'] if row['kind']=='FRAGMENT' else list(reversed(row['points'])) if part['reverse'] else row['points']
         start=len(points) if points else 1
         if points:
             if any(Decimal(points[-1][k])!=Decimal(oriented[0][k]) for k in ('x','y','z')):
@@ -56,7 +43,7 @@ def assemble(items,segments):
         sources.append(copy.deepcopy(row));ranges.append({'start_point':start,'end_point':len(points),'reverse':part['reverse'],'candidate_id':row['id']})
     first=sources[0]
     row={k:first[k] for k in ('document_id','document_hash','job_id','job_hash','unit')}
-    row.update(version=VERSION,kind='ASSEMBLY',ordinal=first['ordinal'],handle=' → '.join(s['handle'] for s in sources),
+    row.update(version=RANGE_VERSION if any(s['kind']=='FRAGMENT' for s in sources) else VERSION,kind='ASSEMBLY',ordinal=first['ordinal'],handle=' → '.join(s['handle'] for s in sources),
                layer=first['layer'] if len({s['layer'] for s in sources})==1 else '多图层（逐项见来源）',
                points=points,source_objects=sources,selection=selected,source_ranges=ranges,joins=joins,eligible=True,issue='')
     row['single_length_m']=calculate(route_body(row,'assembly-preview'))['route_summary']['single_length']
@@ -67,7 +54,6 @@ def assemble(items,segments):
 def rebuild(items,candidate):
     try:
         if candidate.get('kind')=='FRAGMENT':
-            from .dxf_fragments import fragment
             return fragment(items,candidate.get('fragment'))
         if candidate.get('kind')=='ASSEMBLY':return assemble(items,candidate.get('selection'))
         return next((r for r in items if r['id']==candidate.get('id')),None)

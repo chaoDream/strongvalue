@@ -9,7 +9,8 @@ from .engine import precise
 from .dxf_geometry import parse,route_body,VERSION
 from .planar_takeoff import linear
 from .task_execution import original_bytes
-from .dxf_assembly import SourcePart,AssemblyIn,assemble,rebuild
+from .dxf_assembly import AssemblyIn,assemble,rebuild
+from .dxf_selection import AssemblyPart
 from .dxf_fragments import FragmentIn,fragment,overlaps
 
 router=APIRouter(prefix='/api/v1')
@@ -43,7 +44,7 @@ class PreviewIn(BaseModel):
     source_confirmed:Annotated[bool,Field(strict=True)]
     component_id:Text|None=None
     component_hash:Hash|None=None
-    segments:list[SourcePart]|None=Field(default=None,min_length=2,max_length=20)
+    segments:list[AssemblyPart]|None=Field(default=None,min_length=2,max_length=20)
     fragment:FragmentIn|None=None
 
 

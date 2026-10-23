@@ -156,6 +156,16 @@ def tables(p, q, approved):
               src['kind']+' '+src['handle']+' / '+src['layer'],'P'+str(part['start_point'])+'—P'+str(part['end_point']),
               canonical(src['points'][0])+' → '+canonical(src['points'][-1]),src['unit']+' / '+src['document_hash']]
              for x,row in assembled for i,(src,part) in enumerate(zip(row['source_objects'],row['source_ranges']))]))
+    ranged_assemblies=[(x,row) for x,row in assembled if any(s.get('kind')=='FRAGMENT' for s in row['source_objects'])]
+    if ranged_assemblies:
+        result.append(('DXF组装取段顶点映射',['管线 / 修订','顺序 / 原对象 / 图层','原始范围 / 方向','组装点 → 原始点','采用起点 → 终点','原单位 / 原件哈希'],
+            [[x.get('component_name',x['component_id'])+' / V'+str(x['component_revision']),str(i+1)+' / '+raw['kind']+' '+src['handle']+' / '+src['layer'],
+              ('原P'+str(src['fragment']['from_point'])+'—原P'+str(src['fragment']['to_point']) if src.get('fragment') else '完整原对象')+' / '+('反向' if part['reverse'] else '原方向'),
+              '；'.join('P'+str(part['start_point']+j)+'→原P'+str(n) for j,n in enumerate(indices)),
+              canonical(oriented[0])+' → '+canonical(oriented[-1]),src['unit']+' / '+src['document_hash']]
+             for x,row in ranged_assemblies for i,(src,part) in enumerate(zip(row['source_objects'],row['source_ranges']))
+             for raw in [src.get('source_object',src)] for oriented in [src['points'] if src.get('fragment') or not part['reverse'] else list(reversed(src['points']))]
+             for indices in [src['source_point_indices'] if src.get('fragment') else list(range(len(src['points']),0,-1)) if part['reverse'] else list(range(1,len(src['points'])+1))]]))
     offers=snapshot.get('supplier_quotes',[])
     if offers:
         result.append(('供应商报价登记',['资源 / 清单','供应商 / 报价单','单价 / 税制 / 地区','期次 / 有效期','供货条件 / 登记依据','状态 / 原始证据'],

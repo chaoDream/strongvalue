@@ -1,23 +1,12 @@
 """Explicit whole-segment selections from original CAD vertices; no interpolation."""
 import copy
 from fastapi import HTTPException
-from pydantic import Field,model_validator
 from . import store
-from .dxf_assembly import SourcePart
+from .dxf_selection import FragmentIn
 from .dxf_geometry import route_body
 from .route_takeoff import calculate
 
 VERSION='dxf-wcs-fragment-1.0'
-
-
-class FragmentIn(SourcePart):
-    from_point:int=Field(strict=True,ge=1,le=101)
-    to_point:int=Field(strict=True,ge=1,le=101)
-
-    @model_validator(mode='after')
-    def ordered(self):
-        if self.from_point>=self.to_point:raise ValueError('原始顶点范围须从小到大；改变方向请明确选择反向')
-        return self
 
 
 def fragment(items,selection):
@@ -47,6 +36,9 @@ def source_spans(candidate):
         sources=candidate['source_objects'] if candidate['kind']=='ASSEMBLY' else [candidate]
         result=[]
         for source in sources:
+            if source.get('kind')=='FRAGMENT':
+                result.extend(source_spans(source));continue
+            if source.get('kind')=='ASSEMBLY':raise ValueError()
             if not isinstance(source['id'],str) or not source['id'] or not 2<=len(source['points'])<=101:raise ValueError()
             result.append((source['id'],1,len(source['points'])))
         if not result:raise ValueError()
