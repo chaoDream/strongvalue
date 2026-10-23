@@ -180,7 +180,7 @@ def calculate(comp,source=None):
         mixed=mixed_quantity(comp['mixed_cutting'],rows,groups)
         dimensions.update(mixed['dimensions']);refs.update(mixed['source_evidence']);conversions.extend(mixed['unit_conversions'])
         output['mixed_stock_cutting']=mixed
-        output['rule_version']='railing-material-mass-1.14'
+        output['rule_version']='railing-material-mass-1.15' if any('stock_selection' in g for g in mixed['groups']) else 'railing-material-mass-1.14'
         output['notice']=mixed['notice']+'；'+output['notice']
     return output
 

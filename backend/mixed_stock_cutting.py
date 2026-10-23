@@ -51,6 +51,7 @@ def calculate(configs,rows,groups):
     for gi,c in enumerate(configs,1):
         prefix='material.mixed_cutting.'+str(gi)
         fields=set(PARAMETERS)|{'name','members','length_unit','material_basis','compatibility_confirmed','cut_basis_confirmed','measurement_basis','evidence'}
+        if isinstance(c,dict) and 'stock_choices' in c:fields.add('stock_choices')
         if not isinstance(c,dict) or set(c)!=fields:raise DomainError('混合下料须完整填写组名、材料项、材质截面确认、下料参数、说明和原件')
         proofs=set(PARAMETERS)|{'material_basis','measurement_basis'}
         if not isinstance(c['evidence'],dict) or set(c['evidence'])!=proofs:raise DomainError('混排参数、材质截面及范围说明须分别关联原件')
@@ -73,34 +74,48 @@ def calculate(configs,rows,groups):
         for k in proofs:refs[prefix+'.'+k]=text(c['evidence'][k],'混排逐参数原件',200)
         stock=normalized['stock_length'];kerf=normalized['kerf_per_piece'];trim=normalized['trim_start']+normalized['trim_end'];usable=stock-trim
         if usable<=0:raise DomainError('混排原材须大于两端切除总长')
+        multi='stock_choices' in c;options=[dict(index=1,length=stock,ast=asts['stock_length'])]
+        if multi:
+            from . import multi_stock_cutting as multi_cut
+            options=multi_cut.choices(c['stock_choices'],stock,asts['stock_length'],trim,c['length_unit'],prefix,dimensions,refs,conversions)
         pieces=[];demands=[]
         for r in selected:
             n=Fraction(r['normalized_quantity'])*Fraction(groups);cut=Fraction(r['single_member_length'])
             if n.denominator!=1 or not 1<=n<=200:raise DomainError('混排各项全部重复后件数须为1至200整数')
-            if cut+kerf>usable:raise DomainError(r['name']+' 单件下料加锯缝超出混排原材可用长')
+            if cut+kerf>max(o['length']-trim for o in options):raise DomainError(r['name']+' 单件下料加锯缝超出混排原材可用长')
             demands.append(dict(item_index=r['index'],name=r['name'],piece_count=int(n),cut_length=dec(cut),count_formula_ast=op('multiply',r['formula_ast']['args'][1],{'dimension':'multiplicity'})))
             pieces.extend(dict(item_index=r['index'],name=r['name'],piece_index=j,cut=cut,pitch=cut+kerf,ast=r['formula_ast']['args'][0]) for j in range(1,int(n)+1))
         piece_total+=len(pieces)
         if len(pieces)>200 or piece_total>400:raise DomainError('每组混排最多200件，全表最多400件，请按实际范围拆分')
         pieces.sort(key=lambda p:(-p['pitch'],p['item_index'],p['piece_index']))
-        scale=lcm(usable.denominator,*[p['pitch'].denominator for p in pieces]);sizes=[int(p['pitch']*scale) for p in pieces]
-        packed,proof=pack(sizes,int(usable*scale),limit=SEARCH_LIMIT);values={k:Fraction(0) for k in LEDGER};formulas={k:[] for k in LEDGER};bars=[]
-        for bi,indices in enumerate(packed,1):
+        if multi and any(o['length']-trim<min(p['pitch'] for p in pieces) for o in options):raise DomainError('每种候选定尺至少须能下料一件所选材料')
+        scale=lcm(trim.denominator,*[o['length'].denominator for o in options],*[p['pitch'].denominator for p in pieces]);sizes=[int(p['pitch']*scale) for p in pieces]
+        if multi:
+            packed,proof=multi_cut.pack(sizes,[int(o['length']*scale) for o in options],int(trim*scale),limit=SEARCH_LIMIT);proof=multi_cut.proof_lengths(proof,scale)
+        else:
+            packed,proof=pack(sizes,int(usable*scale),limit=SEARCH_LIMIT);packed=[(0,indices) for indices in packed]
+        values={k:Fraction(0) for k in LEDGER};formulas={k:[] for k in LEDGER};bars=[]
+        for bi,(choice,indices) in enumerate(packed,1):
+            stock=options[choice]['length'];stock_ast=options[choice]['ast'];usable=stock-trim
             ps=[pieces[j] for j in indices];net=sum((p['cut'] for p in ps),Fraction(0));kerf_total=len(ps)*kerf;offcut=usable-net-kerf_total
             disposition='none' if offcut==0 else 'retain' if offcut>=normalized['reusable_min_length'] else 'scrap'
             v=dict(net_length=net,kerf_length=kerf_total,trim_length=trim,scrap_length=offcut if disposition=='scrap' else Fraction(0),retained_length=offcut if disposition=='retain' else Fraction(0),purchased_length=stock)
             v['loss_length']=v['kerf_length']+v['trim_length']+v['scrap_length']
-            net_ast=op('add',*[p['ast'] for p in ps]);kerf_ast=op('multiply',asts['kerf_per_piece'],{'constant':str(len(ps))});trim_ast=op('add',asts['trim_start'],asts['trim_end']);off_ast=op('subtract',asts['stock_length'],op('add',net_ast,kerf_ast,trim_ast))
-            fa=dict(net_length=net_ast,kerf_length=kerf_ast,trim_length=trim_ast,scrap_length=off_ast if disposition=='scrap' else {'constant':'0'},retained_length=off_ast if disposition=='retain' else {'constant':'0'},purchased_length=asts['stock_length']);fa['loss_length']=op('add',kerf_ast,trim_ast,fa['scrap_length'])
+            net_ast=op('add',*[p['ast'] for p in ps]);kerf_ast=op('multiply',asts['kerf_per_piece'],{'constant':str(len(ps))});trim_ast=op('add',asts['trim_start'],asts['trim_end']);off_ast=op('subtract',stock_ast,op('add',net_ast,kerf_ast,trim_ast))
+            fa=dict(net_length=net_ast,kerf_length=kerf_ast,trim_length=trim_ast,scrap_length=off_ast if disposition=='scrap' else {'constant':'0'},retained_length=off_ast if disposition=='retain' else {'constant':'0'},purchased_length=stock_ast);fa['loss_length']=op('add',kerf_ast,trim_ast,fa['scrap_length'])
             position=normalized['trim_start'];segments=[]
             for p in ps:
                 segments.append(dict(item_index=p['item_index'],name=p['name'],piece_index=p['piece_index'],from_s=dec(position),to_s=dec(position+p['cut']),kerf_to_s=dec(position+p['pitch']),cut_length=dec(p['cut'])))
                 position+=p['pitch']
             for k in LEDGER:values[k]+=v[k];formulas[k].append(fa[k])
             bars.append(dict(index=bi,piece_count=len(ps),pieces=segments,offcut_length=dec(offcut),offcut_disposition=disposition,values={k:dec(x) for k,x in v.items()},formula_asts=fa))
+            if multi:bars[-1]['stock_choice_index']=options[choice]['index']
         if values['purchased_length']!=values['net_length']+values['loss_length']+values['retained_length']:raise DomainError('混排长度台账未闭合')
         weight=Fraction(selected[0]['normalized_unit_weight']);weight_ast=selected[0]['formula_ast']['args'][2];total_asts={k:op('add',*v) for k,v in formulas.items()}
         total_asts.update({k.replace('_length','_mass'):op('multiply',v,weight_ast) for k,v in list(total_asts.items())})
         total={**values,**{k.replace('_length','_mass'):v*weight for k,v in values.items()}}
         out.append(dict(**c,index=gi,normalized_parameters={k:dec(v) for k,v in normalized.items()},demands=demands,required_piece_count=len(pieces),stock_count=len(bars),normalized_unit_weight=dec(weight),proof=proof,bars=bars,total={k:dec(v) for k,v in total.items()},total_formula_asts=total_asts,balance_difference='0',rule_version=VERSION,notice=NOTICE))
-    return dict(groups=out,covered_item_count=len(occupied),uncovered_item_count=len(rows)-len(occupied),stock_count=sum(g['stock_count'] for g in out),total={k:str(quantity_number(sum((Decimal(g['total'][k]) for g in out),Decimal(0)))) for k in out[0]['total']},total_formula_asts={k:op('add',*[g['total_formula_asts'][k] for g in out]) for k in out[0]['total']},dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,rule_version=VERSION,notice=NOTICE)
+        if multi:
+            out[-1].update(stock_selection=dict(objective='purchased_length_then_stock_count',options=[dict(index=o['index'],stock_length=dec(o['length']),stock_count=sum(b['stock_choice_index']==o['index'] for b in bars)) for o in options]),rule_version=multi_cut.VERSION,notice=multi_cut.NOTICE)
+    multi_table=any('stock_selection' in g for g in out)
+    return dict(groups=out,covered_item_count=len(occupied),uncovered_item_count=len(rows)-len(occupied),stock_count=sum(g['stock_count'] for g in out),total={k:str(quantity_number(sum((Decimal(g['total'][k]) for g in out),Decimal(0)))) for k in out[0]['total']},total_formula_asts={k:op('add',*[g['total_formula_asts'][k] for g in out]) for k in out[0]['total']},dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,rule_version=multi_cut.VERSION if multi_table else VERSION,notice=multi_cut.NOTICE if multi_table else NOTICE)
