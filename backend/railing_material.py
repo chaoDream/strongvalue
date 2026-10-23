@@ -9,9 +9,10 @@ from .planar_takeoff import linear
 from .railing_takeoff import calculate as railing_quantity,validate as validate_railing
 from .surface_takeoff import check_sources
 from .panel_material import calculate as panel_quantity,NOTICE as PANEL_NOTICE
+from .polygon_material import calculate as polygon_panel_quantity,NOTICE as POLYGON_PANEL_NOTICE
 
 VERSION='railing-material-mass-1.0'
-MODES={'continuous':'沿全范围连续构件','cut_pieces':'独立定长构件','rect_panels':'矩形板件或网片'}
+MODES={'continuous':'沿全范围连续构件','cut_pieces':'独立定长构件','rect_panels':'矩形板件或网片','polygon_panels':'异形直边板件或网片'}
 NOTICE='只计算有据填写的等截面线材质量。连续构件按已审栏杆单组未修约计入长度乘全范围道数；定长构件按独立核定的每组件数及每件下料长度计算，不从栏杆间距自动推算立柱。每米质量须有原件，不以密度或含钢率猜测。坡段连续材料须采用三维长度；坐标线水平投影来源只可用于独立定长件。不同局部做法应拆分栏杆来源，不能让某道材料默认适用于未确认范围。不自动增加损耗、接头、搭接、立柱端部、基础、网片或板材质量，不把材料表质量替代栏杆安装清单长度。'
 PANEL_MATERIAL_NOTICE=(NOTICE.replace('只计算有据填写的等截面线材质量。','').replace('、网片或板材质量','').replace('坐标线水平投影来源只可用于独立定长件','坐标线水平投影来源只可用于独立定长件或独立展开板网片')+'；'+PANEL_NOTICE)
 ROUNDING='Decimal 80位；采用来源单组未修约范围长度，各道/件长度和分项质量不修约，分项累计后只乘一次来源重复数量，仅总质量按明确位数HALF_UP修约'
@@ -37,7 +38,7 @@ def source_result(s):
 def candidates(p,cid):
     s=source_component(p,cid);r=source_result(s)
     return {'source_component_id':s['id'],'source_component_hash':store.digest(snapshot(s)),
-            'source_name':s['name'],'source_revision':s['revision'],'source_railing':r,'notice':PANEL_MATERIAL_NOTICE}
+            'source_name':s['name'],'source_revision':s['revision'],'source_railing':r,'notice':PANEL_MATERIAL_NOTICE+'；'+POLYGON_PANEL_NOTICE}
 
 
 @precise
@@ -55,14 +56,14 @@ def calculate(comp,source=None):
     if not isinstance(items,list) or not 1<=len(items)<=50:raise DomainError('材料表须明确1至50项材料，不自动补充立柱或其他材料')
     dimensions=dict(r['dimensions']);refs=dict(r['source_evidence']);conversions=list(r['unit_conversions'])
     for key in ('basis','material','rounding'):refs['material.'+key]=text(comp.get(key+'_evidence_id'),'材料表原始依据',200)
-    rows=[];nodes=[];names=set();total=Decimal(0)
+    rows=[];nodes=[];names=set();total=Decimal(0);polygon_points=0
     single_ast=op('add',*[e['selected_formula_ast'] for e in r['railing_edges']])
     for i,item in enumerate(items,1):
         common={'name','mode','quantity','unit_weight','weight_unit','measurement_basis','evidence'}
-        if not isinstance(item,dict) or not isinstance(item.get('mode'),str) or item['mode'] not in MODES:raise DomainError('材料项须明确连续构件、独立定长构件或矩形板网片')
-        cut=item['mode']=='cut_pieces';panel=item['mode']=='rect_panels'
-        fields=common|({'length','width','length_unit','openings'} if panel else {'cut_length','length_unit'} if cut else set())
-        proofs={'quantity','unit_weight','measurement_basis'}|({'length','width'} if panel else {'cut_length'} if cut else set())
+        if not isinstance(item,dict) or not isinstance(item.get('mode'),str) or item['mode'] not in MODES:raise DomainError('材料项须明确连续构件、独立定长构件或矩形/异形直边板网片')
+        cut=item['mode']=='cut_pieces';polygon=item['mode']=='polygon_panels';panel=item['mode'] in ('rect_panels','polygon_panels')
+        fields=common|({'polygon_rings','coordinate_basis'} if polygon else {'length','width','length_unit','openings'} if panel else {'cut_length','length_unit'} if cut else set())
+        proofs={'quantity','unit_weight','measurement_basis'}|({'coordinate_basis'} if polygon else {'length','width'} if panel else {'cut_length'} if cut else set())
         if set(item)!=fields or not isinstance(item['evidence'],dict) or set(item['evidence'])!=proofs:raise DomainError('材料项字段与逐参数依据须完整且仅包含当前模式所需内容')
         name=text(item['name'],'材料项名称',200)
         if name in names:raise DomainError('同一材料表名称不得重复，请核对是否重复计入')
@@ -77,7 +78,12 @@ def calculate(comp,source=None):
         conversions.append({'parameter':key+'.unit_weight','original_value':str(item['unit_weight']),'source_unit':unit,'factor':str(factor),'canonical_value':str(weight),'canonical_unit':'kg/m²' if panel else 'kg/m','rule_version':UNIT_VERSION})
         weight_ast=op('multiply',{'dimension':key+'.unit_weight'},{'constant':str(factor)})
         if panel:
-            area=panel_quantity(item,key+'.panel.')
+            if polygon:
+                rings=item['polygon_rings']
+                if not isinstance(rings,list) or any(not isinstance(v,dict) or not isinstance(v.get('points'),list) for v in rings):raise DomainError('异形板片须明确外轮廓及逐孔顶点列表')
+                polygon_points+=sum(len(v['points']) for v in rings)
+                if polygon_points>1000:raise DomainError('每表异形板片合计最多1000个顶点，请按实际范围拆表')
+            area=(polygon_panel_quantity if polygon else panel_quantity)(item,key+'.panel.')
             dimensions.update(area['dimensions']);refs.update(area['source_evidence']);conversions.extend(area['unit_conversions'])
             net=Decimal(area['quantity']);mass=net*count*weight;total+=mass
             ast=op('multiply',area['formula_ast'],{'dimension':key+'.quantity'},weight_ast);nodes.append(ast)
@@ -94,7 +100,8 @@ def calculate(comp,source=None):
         ast=op('multiply',length_ast,{'dimension':key+'.quantity'},weight_ast);nodes.append(ast)
         rows.append({**item,'index':i,'normalized_quantity':str(count),'normalized_unit_weight':str(weight),
                      'single_member_length':str(length),'single_group_stock_length':str(stock_length),'single_group_mass':str(mass),'formula_ast':ast})
-    has_panels=any(v['mode']=='rect_panels' for v in items)
+    has_polygons=any(v['mode']=='polygon_panels' for v in items)
+    has_panels=any(v['mode'] in ('rect_panels','polygon_panels') for v in items)
     groups=Decimal(summary['multiplicity']);gross=quantity_number(total*groups)
     quantity=quantity_number(gross.quantize(Decimal(1).scaleb(-digits),rounding=ROUND_HALF_UP))
     return {'quantity':str(quantity),'unit':'kg','gross':str(gross),'deduction':'0','parameters':{},
@@ -107,7 +114,7 @@ def calculate(comp,source=None):
                                 'source_length_basis':summary.get('length_basis_label','多边形原边水平长度'),'item_count':len(rows),
                                 'single_group_mass':str(total),'multiplicity':str(groups),'unrounded_quantity':str(gross),
                                 'rounding_digits':digits,'rounding_adjustment':str(quantity-gross)},
-            'rule_version':'railing-material-mass-1.1' if has_panels else VERSION,'rounding_rule':ROUNDING+('；板件单片净展开面积与分项质量均不修约' if has_panels else ''),'notice':PANEL_MATERIAL_NOTICE if has_panels else NOTICE}
+            'rule_version':'railing-material-mass-1.2' if has_polygons else 'railing-material-mass-1.1' if has_panels else VERSION,'rounding_rule':ROUNDING+('；板件单片净展开面积与分项质量均不修约' if has_panels else ''),'notice':PANEL_MATERIAL_NOTICE+'；'+POLYGON_PANEL_NOTICE if has_polygons else PANEL_MATERIAL_NOTICE if has_panels else NOTICE}
 
 
 def validate(p,comp,saved=False):

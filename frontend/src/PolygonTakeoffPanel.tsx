@@ -5,7 +5,7 @@ const states:Obj={draft:'待复核',approved:'已审定',stale:'已失效',rejec
 const units=['m','mm','cm','dm','km'];
 function F({label,children}:any){return <label className="field"><span>{label}</span>{children}</label>}
 
-export function PolygonDiagram({result}:{result:Obj}){
+export function PolygonDiagram({result,ariaLabel="水平多边形及扣孔设计坐标示意，非测量图",maxHeight=340}:{result:Obj;ariaLabel?:string;maxHeight?:number}){
  const [chosen,setChosen]=useState('1');
  const rings=result.polygon_rings.map((r:Obj)=>({...r,plot:r.points.map((p:Obj)=>[Number(p.normalized_parameters.x),Number(p.normalized_parameters.y)])}));
  const all=rings.flatMap((r:Obj)=>r.plot),x0=Math.min(...all.map((p:number[])=>p[0])),x1=Math.max(...all.map((p:number[])=>p[0])),y0=Math.min(...all.map((p:number[])=>p[1])),y1=Math.max(...all.map((p:number[])=>p[1]));
@@ -13,7 +13,7 @@ export function PolygonDiagram({result}:{result:Obj}){
  const scale=Math.min(560/(x1-x0),240/(y1-y0)),pos=(p:number[])=>[40+(p[0]-x0)*scale,280-(p[1]-y0)*scale];
  const path=rings.map((r:Obj)=>r.plot.map((p:number[],i:number)=>(i?'L':'M')+pos(p).join(',')).join(' ')+'Z').join(' '),active=rings.find((r:Obj)=>String(r.index)===chosen)||rings[0];
  return <><F label="示意图顶点标记范围"><select aria-label="多边形示意标记轮廓" value={String(active.index)} onChange={e=>setChosen(e.target.value)}>{rings.map((r:Obj)=><option key={r.index} value={r.index}>R{r.index} {r.name} · {r.role==='outer'?'外轮廓':'扣孔'}</option>)}</select></F>
-  <svg viewBox="0 0 640 320" role="img" aria-label="水平多边形及扣孔设计坐标示意，非测量图" style={{width:'100%',maxHeight:340,background:'#f5f8f6',borderRadius:8}}><path d={path} fill="#a3c4ad" fillRule="evenodd" stroke="#315c46" strokeWidth="1.5"/>{active.plot.map((p:number[],i:number)=>{const [x,y]=pos(p);return <g key={i}><circle cx={x} cy={y} r="3" fill="#a66043"/><text x={x+5} y={y-6} fontSize="11" fill="#263b2e">R{active.index}.P{i+1}</text></g>})}<text x="20" y="310" fontSize="12" fill="#536b5b">X向右，Y向上 · 按顺序首尾闭合 · 绿色为净区域</text></svg><p className="form-note">坐标示意只供定位，不能测量或拖点修改；极小边界以精确数值为准。</p></>;
+  <svg viewBox="0 0 640 320" role="img" aria-label={ariaLabel} style={{width:'100%',maxHeight,background:'#f5f8f6',borderRadius:8}}><path d={path} fill="#a3c4ad" fillRule="evenodd" stroke="#315c46" strokeWidth="1.5"/>{active.plot.map((p:number[],i:number)=>{const [x,y]=pos(p);return <g key={i}><circle cx={x} cy={y} r="3" fill="#a66043"/><text x={x+5} y={y-6} fontSize="11" fill="#263b2e">R{active.index}.P{i+1}</text></g>})}<text x="20" y="310" fontSize="12" fill="#536b5b">X向右，Y向上 · 按顺序首尾闭合 · 绿色为净区域</text></svg><p className="form-note">坐标示意只供定位，不能测量或拖点修改；极小边界以精确数值为准。</p></>;
 }
 
 export function PolygonDetails({item,sourceLink}:{item:Obj;sourceLink?:(id:string)=>React.ReactNode}){
