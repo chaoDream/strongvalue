@@ -144,7 +144,12 @@ def calculate(comp,source=None):
 
     if any('spacing_check' in item for item in items):
         output['rule_version']='railing-material-mass-1.10'
-        output['notice']=SPACING_NOTICE+'；'+output['notice']
+        if any('spacing_check' in item and 'scope' not in item['spacing_check'] for item in items):
+            output['notice']=SPACING_NOTICE+'；'+output['notice']
+        if any(item.get('spacing_check',{}).get('scope')=='connected_path' for item in items):
+            from .path_post_spacing import NOTICE as PATH_NOTICE
+            output['rule_version']='railing-material-mass-1.11'
+            output['notice']=PATH_NOTICE+'；'+output['notice']
     return output
 
 

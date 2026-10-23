@@ -50,6 +50,9 @@ def identity(p):
 
 @precise
 def calculate(check,layout,source,mode,prefix):
+    if isinstance(check,dict) and 'scope' in check:
+        from .path_post_spacing import calculate as path_quantity
+        return path_quantity(check,layout,source,mode,prefix)
     if not isinstance(check,dict) or set(check)!={'max_spacing','spacing_unit','measurement_basis','evidence'}:raise DomainError('实际柱距核查须完整填写上限、单位、范围说明及依据')
     if not isinstance(check['evidence'],dict) or set(check['evidence'])!={'max_spacing','measurement_basis'}:raise DomainError('实际柱距上限与核查范围说明须分别关联原始依据')
     text(check['measurement_basis'],'实际柱距核查范围说明');limit=linear(check['max_spacing'],check['spacing_unit'],True)
