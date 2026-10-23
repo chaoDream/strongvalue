@@ -138,6 +138,19 @@ def read_fragment(pid:str,did:str,body:FragmentIn,a=Depends(core.actor)):
                 'notice':'只按明确原始顶点范围读取完整管段，不插值、不补段；采用前仍须独立长度校核与用途确认。'}
 
 
+@router.get('/projects/{pid}/components/{cid}/dxf-source-view')
+def source_view(pid:str,cid:str,revision:int=Query(...,ge=1),source_stamp:str=Query(...,pattern=r'^[a-f0-9]{64}$'),projection:Literal['xy','xz','yz']='xz',a=Depends(core.actor)):
+    with store.connect() as conn:
+        p=core.project(conn,pid,a);comp=core.find(p,'components',cid)
+        if comp['kind']!='design_route' or not comp.get('dxf_trace'):raise HTTPException(422,'此构件没有可回查的CAD管线来源')
+        if comp['revision']!=revision or comp.get('source_stamp')!=source_stamp:raise HTTPException(409,'管线版本或来源已变化，请刷新后重新核对')
+        from .route_takeoff import validate
+        validate(p,comp,saved=True)
+        from .dxf_trace_view import build
+        doc=core.find(p,'documents',comp['dxf_trace']['candidate']['document_id'])
+        return build(comp,doc,projection)
+
+
 @router.post('/projects/{pid}/documents/{did}/dxf-route-assembly')
 def assembly(pid:str,did:str,body:AssemblyIn,a=Depends(core.actor)):
     with store.connect() as conn:
