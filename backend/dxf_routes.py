@@ -111,11 +111,14 @@ def evaluate(p,did,cid,body):
     from .route_takeoff import calculate
     result=calculate(route_body(row,'dxf-candidate-preview',**body))
     if bool(body.get('component_id'))!=bool(body.get('component_hash')):raise HTTPException(422,'修订须同时选择原DXF管线及其版本校验值')
+    comparison={}
     if body.get('component_id'):
         old=core.find(p,'components',body['component_id'])
         if old['kind']!='design_route' or not old.get('dxf_trace') or store.digest(old)!=body['component_hash']:
             raise HTTPException(409,'原DXF管线已变化或不属于此类来源，请重新选择')
-    return {'candidate':row,'calibration':check,'proofs':proof,'result':result,'request':body,'document_name':doc['name']}
+        from .dxf_revision_diff import compare
+        comparison={'revision_comparison':compare(old,row,body,result)}
+    return {'candidate':row,'calibration':check,'proofs':proof,'result':result,'request':body,'document_name':doc['name'],**comparison}
 
 
 @router.get('/projects/{pid}/documents/{did}/dxf-route-candidates')
@@ -206,6 +209,7 @@ def adopt(pid:str,did:str,cid:str,body:AdoptIn,a=Depends(core.actor)):
             raise HTTPException(409,'所选CAD原始管段已有管线登记，请选择原管线修订或不重叠的顶点范围，不能重复计长')
         eid=store.uid();trace={'version':VERSION,'candidate':row,'scope':{k:payload[k] for k in SCOPE},'calibration':result['calibration'],'calibration_input':body.calibration.model_dump(),
                               'proofs':result['proofs'],'source_confirmed':True,'reason':body.reason,'author':a['username'],'created_at':store.now(),'evidence_id':eid}
+        if old:trace['revision_comparison']=copy.deepcopy(result['revision_comparison'])
         ev={'id':eid,'document_id':did,'document_hash':row['document_hash'],'page':None,'bbox':None,'method':'dxf_geometry',
             'text':evidence_text(row),
             'dxf_geometry':copy.deepcopy(row)}
@@ -214,6 +218,7 @@ def adopt(pid:str,did:str,cid:str,body:AdoptIn,a=Depends(core.actor)):
         comp.update(id=old['id'] if old else store.uid(),revision=old['revision']+1 if old else 1)
         record={'id':store.uid(),'component_id':comp['id'],'component_name':comp['name'],'component_revision':comp['revision'],'trace':copy.deepcopy(trace),
                 'previous_component_hash':body.component_hash,'request_id':body.request_id,'request_hash':request_hash,'author':a['username']}
+        if old:record['revision_comparison_hash']=store.digest(trace['revision_comparison'])
         p['dxf_route_adoptions'].append(record)
         from .route_takeoff import validate
         calculated,stamp=validate(p,comp)
@@ -267,6 +272,9 @@ def _validate_trace(p,comp):
     if not isinstance(trace,dict) or trace.get('version')!=VERSION:raise HTTPException(409,'DXF管线来源记录无效')
     if trace.get('source_confirmed') is not True or not any(x.get('trace')==trace for x in p.get('dxf_route_adoptions',[])):
         raise HTTPException(409,'DXF采用记录已变化或缺失，请重新校核采用')
+    record=next(x for x in p['dxf_route_adoptions'] if x.get('trace')==trace)
+    from .dxf_revision_diff import validate as validate_comparison
+    validate_comparison(p,comp,record)
     candidate=trace.get('candidate',{})
     if not isinstance(candidate,dict):raise HTTPException(409,'DXF原对象来源无效')
     Calibration.model_validate(trace['calibration_input'])

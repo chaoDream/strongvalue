@@ -136,6 +136,8 @@ def tables(p, q, approved):
                [[r['collection'], r['object_id'], r['decision'], r['reviewer'], r['timestamp'], r['reason'], r['object_hash']] for r in snapshot['reviews']+report_reviews]),
               ('缺项与警示', ['事项'], [[x] for x in ((q['warnings'] if q else [])+(['当前版本已失效；源输入已变更'] if q and q['id'] in p['stale_quotes'] else []))])]
     dxf_routes=snapshot.get('dxf_route_adoptions',[])
+    from .dxf_revision_diff import report_tables as dxf_revision_tables
+    result.extend(dxf_revision_tables(dxf_routes))
     if dxf_routes:
         result.append(('DXF坐标采用与单位校核',['管线 / 修订','原CAD对象','已知两点距离 / CAD距离','容差 / 偏差','采用核对依据','操作人 / 时间'],
             [[x.get('component_name',x['component_id'])+' / V'+str(x['component_revision']),t['candidate']['document_id']+' / '+t['candidate']['kind']+' '+t['candidate']['handle']+' / '+t['candidate']['layer']+' / '+t['candidate']['unit'],
