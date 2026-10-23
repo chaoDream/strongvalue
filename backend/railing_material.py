@@ -70,6 +70,7 @@ def calculate(comp,source=None):
         spaced=item['mode'] in ('spaced_posts','fixed_posts','fixed_added_posts','spaced_added_posts','fixed_adjusted_posts','spaced_adjusted_posts','fixed_added_adjusted_posts','spaced_added_adjusted_posts');cut=item['mode'] in ('cut_pieces','spaced_posts','fixed_posts','fixed_added_posts','spaced_added_posts','fixed_adjusted_posts','spaced_adjusted_posts','fixed_added_adjusted_posts','spaced_added_adjusted_posts');polygon=item['mode']=='polygon_panels';panel=item['mode'] in ('rect_panels','polygon_panels')
         fields=(common-{'quantity'} if spaced else common)|({'post_ranges','cut_length','length_unit'} if spaced else {'polygon_rings','coordinate_basis'} if polygon else {'length','width','length_unit','openings'} if panel else {'cut_length','length_unit'} if cut else set())
         if spaced and 'spacing_check' in item:fields.add('spacing_check')
+        if not panel and 'stock_allowance' in item:fields.add('stock_allowance')
         proofs=({'unit_weight','measurement_basis'} if spaced else {'quantity','unit_weight','measurement_basis'})|({'coordinate_basis'} if polygon else {'length','width'} if panel else {'cut_length'} if cut else set())
         if set(item)!=fields or not isinstance(item['evidence'],dict) or set(item['evidence'])!=proofs:raise DomainError('材料项字段与逐参数依据须完整且仅包含当前模式所需内容')
         name=text(item['name'],'材料项名称',200)
@@ -150,6 +151,17 @@ def calculate(comp,source=None):
             from .path_post_spacing import NOTICE as PATH_NOTICE
             output['rule_version']='railing-material-mass-1.11'
             output['notice']=PATH_NOTICE+'；'+output['notice']
+    if any('stock_allowance' in item for item in items):
+        from .stock_allowance import calculate as allowance_quantity,NOTICE as ALLOWANCE_NOTICE
+        selected=[]
+        for row in rows:
+            if 'stock_allowance' not in row:continue
+            allowance=allowance_quantity(row['stock_allowance'],row,groups,'material.'+str(row['index'])+'.stock_allowance')
+            row['stock_planning']=allowance;selected.append(allowance)
+            dimensions.update(allowance['dimensions']);refs.update(allowance['source_evidence']);conversions.extend(allowance['unit_conversions'])
+        output['stock_summary']={'item_count':len(selected),'unplanned_item_count':len(items)-len(selected),'planned_item_indices':[row['index'] for row in rows if 'stock_planning' in row],'total_formula_asts':{k:op('add',*[v['total_formula_asts'][k] for v in selected]) for k in selected[0]['total']},'total':{k:str(quantity_number(sum((Decimal(v['total'][k]) for v in selected),Decimal(0)))) for k in selected[0]['total']},'notice':'仅汇总已启用的线材项，未启用项未编备料；不改变净工程量或报价。'}
+        output['rule_version']='railing-material-mass-1.12'
+        output['notice']=ALLOWANCE_NOTICE+'；'+output['notice']
     return output
 
 

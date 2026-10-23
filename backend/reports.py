@@ -403,6 +403,18 @@ def tables(p, q, approved):
                        [[t['name']+' / '+v['name'],str(v['quantity']),str(v['unit_weight'])+' '+v['weight_unit'],str(v['cut_length'])+' '+v['length_unit'] if v['mode']=='cut_pieces' else '采用来源单组未修约计入长度',material_proofs(v)] for t in materials for v in t['material_items'] if v['mode'] in ('continuous','cut_pieces')]))
         result.append(('栏杆材料计长来源',['材料表 / 来源原段','原边或原段 / 决定','来源计入长（m）','局部区间（m）','范围说明及依据'],
                        [[t['name']+' / '+('S'+str(e['edge_index']) if e['role']=='route' else 'R'+str(e['ring_index'])+' E'+str(e['edge_index'])),('设计线段' if e['role']=='route' else '外轮廓' if e['role']=='outer' else '孔')+' / '+{'exclude':'排除','full':'整段','ranges':'局部区间'}[e['mode']],e['selected_length'],'；'.join(v['s_from']+'→'+v['s_to'] for v in e['normalized_ranges']) if e['mode']=='ranges' else '整段' if e['mode']=='full' else '无计入',e['basis']+'；'+e['evidence_id']] for t in materials for e in t['source_railing']['railing_edges']]))
+    allowance_rows=[(t,v) for t in materials for v in t['material_items'] if 'stock_planning' in v]
+    if allowance_rows:
+        stock_labels={'net':'净用量','lap':'搭接增量','loss':'损耗增量','procurement':'备料量'}
+        result.append(('线材备料汇总',['材料表','已编 / 未编备料项数','组成','合计长度（m）','合计质量（kg）'],
+                       [[t['name'],str(t['stock_summary']['item_count'])+' / '+str(t['stock_summary']['unplanned_item_count'])+'（含不适用项）',label,t['stock_summary']['total'][key+'_length'],t['stock_summary']['total'][key+'_mass']] for t in materials if 'stock_summary' in t for key,label in stock_labels.items()]))
+        stock_proofs={'joint_count':'每组接头总数','lap_length':'每处搭接长度','loss_percent':'损耗率','measurement_basis':'范围及不重复说明'}
+        result.append(('线材搭接损耗备料',['材料表 / 材料项','组成','单组长度（m） / 质量（kg）','来源重复','全部长度（m） / 质量（kg）'],
+                       [[t['name']+' / '+v['name'],label,v['stock_planning']['single_group'][key+'_length']+' / '+v['stock_planning']['single_group'][key+'_mass'],t['material_summary']['multiplicity'],v['stock_planning']['total'][key+'_length']+' / '+v['stock_planning']['total'][key+'_mass']] for t,v in allowance_rows for key,label in stock_labels.items()]))
+        result.append(('线材备料参数依据',['材料表 / 材料项','每组接头总数 / 每处搭接','损耗率（%）','范围、净量确认及逐参数原件'],
+                       [[t['name']+' / '+v['name'],str(v['stock_allowance']['joint_count'])+'处 / '+str(v['stock_allowance']['lap_length'])+' '+v['stock_allowance']['length_unit'],str(v['stock_allowance']['loss_percent']),v['stock_allowance']['measurement_basis']+'；已确认原净下料不含本次搭接与损耗；'+'；'.join(stock_proofs[k]+': '+eid for k,eid in v['stock_allowance']['evidence'].items())] for t,v in allowance_rows]))
+        result.append(('线材备料规则与范围',['材料表 / 材料项','公式、适用范围及版本'],
+                       [[t['name']+' / '+v['name'],v['stock_planning']['notice']+'；'+v['stock_planning']['rule_version']] for t,v in allowance_rows]))
     panels=[(t,v) for t in materials for v in t['material_items'] if v['mode']=='rect_panels']
     if panels:
         result.append(('板网片净面积与质量',['材料表 / 板网片','外矩形 / 开口并集（m²）','开口直加 / 消除重复（m²）','单片净面积（m²）','每组片数 / 净面积（m²）','面密度（kg/m²）','单组质量（kg）','口径及逐项依据'],
