@@ -91,7 +91,7 @@ def calculate(configs,rows,groups):
         if multi and any(o['length']-trim<min(p['pitch'] for p in pieces) for o in options):raise DomainError('每种候选定尺至少须能下料一件所选材料')
         scale=lcm(trim.denominator,*[o['length'].denominator for o in options],*[p['pitch'].denominator for p in pieces]);sizes=[int(p['pitch']*scale) for p in pieces]
         if multi:
-            packed,proof=multi_cut.pack(sizes,[int(o['length']*scale) for o in options],int(trim*scale),limit=SEARCH_LIMIT);proof=multi_cut.proof_lengths(proof,scale)
+            packed,proof=multi_cut.pack(sizes,[int(o['length']*scale) for o in options],int(trim*scale),limit=SEARCH_LIMIT,limits=[o['supply_limit'] for o in options] if 'supply_limit' in options[0] else None);proof=multi_cut.proof_lengths(proof,scale)
         else:
             packed,proof=pack(sizes,int(usable*scale),limit=SEARCH_LIMIT);packed=[(0,indices) for indices in packed]
         values={k:Fraction(0) for k in LEDGER};formulas={k:[] for k in LEDGER};bars=[]
@@ -117,5 +117,12 @@ def calculate(configs,rows,groups):
         out.append(dict(**c,index=gi,normalized_parameters={k:dec(v) for k,v in normalized.items()},demands=demands,required_piece_count=len(pieces),stock_count=len(bars),normalized_unit_weight=dec(weight),proof=proof,bars=bars,total={k:dec(v) for k,v in total.items()},total_formula_asts=total_asts,balance_difference='0',rule_version=VERSION,notice=NOTICE))
         if multi:
             out[-1].update(stock_selection=dict(objective='purchased_length_then_stock_count',options=[dict(index=o['index'],stock_length=dec(o['length']),stock_count=sum(b['stock_choice_index']==o['index'] for b in bars)) for o in options]),rule_version=multi_cut.VERSION,notice=multi_cut.NOTICE)
+            if 'supply_limit' in options[0]:
+                from .limited_stock_cutting import VERSION as LIMITED_VERSION,NOTICE as LIMITED_NOTICE
+                for o,n in zip(out[-1]['stock_selection']['options'],options):
+                    o.update(supply_limit=n['supply_limit'],unselected_supply=n['supply_limit']-o['stock_count'],supply_limit_formula_ast=n['supply_limit_formula_ast'],unselected_supply_formula_ast=op('subtract',n['supply_limit_formula_ast'],{'constant':str(o['stock_count'])}))
+                    if o['unselected_supply']<0:raise DomainError('有限供应选用根数超出核定上限')
+                out[-1]['stock_selection']['supply_limited']=True;out[-1].update(rule_version=LIMITED_VERSION,notice=LIMITED_NOTICE)
+    limited_table=any(g.get('stock_selection',{}).get('supply_limited') for g in out)
     multi_table=any('stock_selection' in g for g in out)
-    return dict(groups=out,covered_item_count=len(occupied),uncovered_item_count=len(rows)-len(occupied),stock_count=sum(g['stock_count'] for g in out),total={k:str(quantity_number(sum((Decimal(g['total'][k]) for g in out),Decimal(0)))) for k in out[0]['total']},total_formula_asts={k:op('add',*[g['total_formula_asts'][k] for g in out]) for k in out[0]['total']},dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,rule_version=multi_cut.VERSION if multi_table else VERSION,notice=multi_cut.NOTICE if multi_table else NOTICE)
+    return dict(groups=out,covered_item_count=len(occupied),uncovered_item_count=len(rows)-len(occupied),stock_count=sum(g['stock_count'] for g in out),total={k:str(quantity_number(sum((Decimal(g['total'][k]) for g in out),Decimal(0)))) for k in out[0]['total']},total_formula_asts={k:op('add',*[g['total_formula_asts'][k] for g in out]) for k in out[0]['total']},dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,rule_version=LIMITED_VERSION if limited_table else multi_cut.VERSION if multi_table else VERSION,notice=LIMITED_NOTICE if limited_table else multi_cut.NOTICE if multi_table else NOTICE)

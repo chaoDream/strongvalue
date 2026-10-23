@@ -434,9 +434,9 @@ def tables(p, q, approved):
         mixed_params={'stock_length':'原材定尺','kerf_per_piece':'每件锯缝','trim_start':'起端切除','trim_end':'终端切除','reusable_min_length':'留用余料下限','material_basis':'材质截面兼容说明','measurement_basis':'混排下料范围说明'}
         def mixed_proof(g):
             p=g['proof']
-            return ('先最小购长再最少根数；购长下界'+p['length_lower_bound']+'m、初始'+p['initial_purchased_length']+'m / '+str(p['initial_stock_count'])+'根、当前'+p['purchased_length']+'m / '+str(g['stock_count'])+'根；购长未证差距'+p['unproven_length_gap']+'m；按需供应说明：'+g['stock_choices']['measurement_basis']+' 原件：'+g['stock_choices']['evidence_id']) if 'stock_selection' in g else '长度下界'+str(p['lower_bound'])+'、当前'+str(g['stock_count'])+'根'
+            return ('先最小购长再最少根数；购长下界'+p['length_lower_bound']+'m、初始'+(p['initial_purchased_length']+'m / '+str(p['initial_stock_count'])+'根' if p['initial_purchased_length'] is not None else '未找到可行方案')+'、当前'+p['purchased_length']+'m / '+str(g['stock_count'])+'根；购长未证差距'+p['unproven_length_gap']+'m'+('；规格及目标说明：' if g['stock_selection'].get('supply_limited') else '；按需供应说明：')+g['stock_choices']['measurement_basis']+' 原件：'+g['stock_choices']['evidence_id']+('；有限供应范围：'+g['stock_choices']['supply_limits']['measurement_basis']+' 原件：'+g['stock_choices']['supply_limits']['evidence_id'] if g['stock_selection'].get('supply_limited') else '')) if 'stock_selection' in g else '长度下界'+str(p['lower_bound'])+'、当前'+str(g['stock_count'])+'根'
         result.append(('混合下料汇总',['材料表 / 混排组','需求件数 / 原材根数','下界 / 初始（多定尺为购长m）' if any('stock_selection' in g for _,g in mixed_rows) else '根数下界 / 初始方案','搜索节点 / 上限','最优性结论','购入长度（m） / 质量（kg）'],
-                       [[t['name']+' / '+g['name'],str(g['required_piece_count'])+' / '+str(g['stock_count']),(g['proof']['length_lower_bound']+'m / '+g['proof']['initial_purchased_length']+'m' if 'stock_selection' in g else str(g['proof']['lower_bound'])+' / '+str(g['proof']['initial_stock_count'])),str(g['proof']['visited_nodes'])+' / '+str(g['proof']['node_limit']),mixed_status[g['proof']['status']],g['total']['purchased_length']+' / '+g['total']['purchased_mass']] for t,g in mixed_rows]))
+                       [[t['name']+' / '+g['name'],str(g['required_piece_count'])+' / '+str(g['stock_count']),(g['proof']['length_lower_bound']+'m / '+(g['proof']['initial_purchased_length']+'m' if g['proof']['initial_purchased_length'] is not None else '未找到') if 'stock_selection' in g else str(g['proof']['lower_bound'])+' / '+str(g['proof']['initial_stock_count'])),str(g['proof']['visited_nodes'])+' / '+str(g['proof']['node_limit']),mixed_status[g['proof']['status']],g['total']['purchased_length']+' / '+g['total']['purchased_mass']] for t,g in mixed_rows]))
         result.append(('混合下料需求',['材料表 / 混排组','原材料项','全部重复后件数','单件完整下料长（m）'],
                        [[t['name']+' / '+g['name'],'M'+str(d['item_index'])+' '+d['name'],str(d['piece_count']),d['cut_length']] for t,g in mixed_rows for d in g['demands']]))
         result.append(('混合下料原材明细',['材料表 / 混排组','原材号 / 出件数','所下材料项及项内件号','每根净长 / 锯缝 / 切除（m）','每根余料（m） / 归属'],
@@ -450,7 +450,11 @@ def tables(p, q, approved):
     multi_rows=[(t,g,o) for t,g in mixed_rows for o in g.get('stock_selection',{}).get('options',[])]
     if multi_rows:
         result.append(('多定尺候选与选用',['材料表 / 混排组','候选编号','定尺（m）','选用根数','定尺原件','目标 / 供应依据'],
-                       [[t['name']+' / '+g['name'],'S'+str(o['index']),o['stock_length'],str(o['stock_count']),g['evidence']['stock_length'] if o['index']==1 else g['stock_choices']['alternatives'][o['index']-2]['evidence_id'],'先最小购长，再最少根数；按需供应原件：'+g['stock_choices']['evidence_id']] for t,g,o in multi_rows]))
+                       [[t['name']+' / '+g['name'],'S'+str(o['index']),o['stock_length'],str(o['stock_count']),g['evidence']['stock_length'] if o['index']==1 else g['stock_choices']['alternatives'][o['index']-2]['evidence_id'],'先最小购长，再最少根数；'+('规格与目标原件：' if g['stock_selection'].get('supply_limited') else '按需供应原件：')+g['stock_choices']['evidence_id']] for t,g,o in multi_rows]))
+    limited_rows=[(t,g,o) for t,g,o in multi_rows if g['stock_selection'].get('supply_limited')]
+    if limited_rows:
+        result.append(('有限供应选用台账',['材料表 / 混排组','候选 / 定尺（m）','可供上限（根）','选用（根）','未选用供应（根）','上限原件'],
+                       [[t['name']+' / '+g['name'],'S'+str(o['index'])+' / '+o['stock_length'],str(o['supply_limit']),str(o['stock_count']),str(o['unselected_supply']),g['stock_choices']['supply_limits']['quantities'][o['index']-1]['evidence_id']] for t,g,o in limited_rows]))
     panels=[(t,v) for t in materials for v in t['material_items'] if v['mode']=='rect_panels']
     if panels:
         result.append(('板网片净面积与质量',['材料表 / 板网片','外矩形 / 开口并集（m²）','开口直加 / 消除重复（m²）','单片净面积（m²）','每组片数 / 净面积（m²）','面密度（kg/m²）','单组质量（kg）','口径及逐项依据'],

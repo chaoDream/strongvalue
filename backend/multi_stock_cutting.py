@@ -12,8 +12,10 @@ NOTICE='仅对本组已据原件确认可按需供应、同材质同截面的2�
 
 def choices(config,stock,stock_ast,trim,unit,prefix,dimensions,refs,conversions):
     c=config
-    if not isinstance(c,dict) or set(c)!={'alternatives','supply_confirmed','measurement_basis','evidence_id'}:raise DomainError('多定尺须填写备选长度、按需供应确认、供应与选择口径说明及原件')
-    if c['supply_confirmed'] is not True:raise DomainError('须据原件确认各定尺同规格且可按需供应；限量库存不得用此模式')
+    limited=isinstance(c,dict) and 'supply_limits' in c
+    if not isinstance(c,dict) or set(c)-({'supply_limits'} if limited else set())!={'alternatives','supply_confirmed','measurement_basis','evidence_id'}:raise DomainError('多定尺须填写备选长度、按需供应确认、供应与选择口径说明及原件')
+    if limited and c['supply_confirmed'] is not False:raise DomainError('有限供应不能同时确认不限量按需供应，请明确选择供应口径')
+    if not limited and c['supply_confirmed'] is not True:raise DomainError('须据原件确认各定尺同规格且可按需供应；限量库存不得用此模式')
     text(c['measurement_basis'],'多定尺供应与选择口径说明');refs[prefix+'.supply_basis']=text(c['evidence_id'],'多定尺供应口径原件',200)
     items=c['alternatives']
     if not isinstance(items,list) or not 1<=len(items)<=4:raise DomainError('须填写1至4种额外定尺，与原定尺合计2至5种')
@@ -26,11 +28,18 @@ def choices(config,stock,stock_ast,trim,unit,prefix,dimensions,refs,conversions)
         key=prefix+'.choices.'+str(i);dimensions[key]=str(item['stock_length']);refs[key]=text(item['evidence_id'],'备选原材定尺原件',200)
         ast=op('multiply',{'dimension':key},{'constant':LENGTH[unit]});result.append(dict(index=i,length=length,ast=ast))
         conversions.append(dict(parameter=key,original_value=str(item['stock_length']),source_unit=unit,factor=LENGTH[unit],canonical_value=str(v),canonical_unit='m',rule_version=UNIT_VERSION))
+    if limited:
+        from .limited_stock_cutting import validate
+        limits=validate(c['supply_limits'],result,prefix,dimensions,refs)
+        for o,n in zip(result,limits):o.update(supply_limit=n,supply_limit_formula_ast={'dimension':prefix+'.supply_limits.'+str(o['index'])})
     return result
 
 
-def pack(sizes,stocks,trim,limit=5000):
+def pack(sizes,stocks,trim,limit=5000,limits=None):
     """Stocks are integer full lengths. Returned choices index the input list."""
+    if limits is not None:
+        from .limited_stock_cutting import pack as limited_pack
+        return limited_pack(sizes,stocks,trim,limits,limit)
     capacities=[s-trim for s in stocks];order=sorted(range(len(stocks)),key=lambda j:(stocks[j],j))
     def score(plan):return sum(stocks[j] for j,_ in plan),len(plan)
     candidates=[]
@@ -74,5 +83,6 @@ def pack(sizes,stocks,trim,limit=5000):
 
 
 def proof_lengths(proof,scale):
-    for key in ('length_lower_bound','initial_purchased_length','purchased_length','unproven_length_gap'):proof[key]=dec(Fraction(proof[key],scale))
+    for key in ('length_lower_bound','initial_purchased_length','purchased_length','unproven_length_gap'):
+        if proof[key] is not None:proof[key]=dec(Fraction(proof[key],scale))
     return proof
