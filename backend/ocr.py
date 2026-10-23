@@ -155,31 +155,38 @@ class LineLocationIn(BaseModel):
     model_config = {'extra': 'forbid'}
 
 
-@router.post('/projects/{pid}/evidence/{eid}/ocr-lines/{number}/locate')
-def locate_line(pid: str, eid: str, body: LineLocationIn,
-                number: int = PathParam(ge=1, le=2000), a=Depends(core.actor)):
-    """Read-only POST keeps recognized text out of URL/access logs."""
+def verified_line_location(p, eid, number, body, *, verify_bytes=True):
     from .drawing_candidates import ocr_origin
-    with store.connect() as c:
-        p=core.project(c,pid,a);e=core.require_evidence(p,eid);d=core.find(p,'documents',e['document_id'])
-        if e.get('method')!='local_ocr' or not d['name'].lower().endswith('.pdf'):
-            raise HTTPException(422,'原行定位只支持本地OCR的PDF证据')
-        if e.get('document_hash')!=d['hash'] or ocr_origin(p,e,{}) is None:
-            raise HTTPException(409,'扫描识别来源已变化，请重新读取当前结果')
-        digest=store.digest(e)
-        if body.evidence_hash is not None and body.evidence_hash!=digest:
-            raise HTTPException(409,'扫描候选依据已变化，请重新读取候选')
-        lines=e['ocr']['lines']
-        if number>len(lines):raise HTTPException(422,'识别行号超出当前结果范围')
-        line=lines[number-1]
-        if body.expected_line!={k:line[k] for k in ('text','bbox','confidence')}:
-            raise HTTPException(409,'所选识别原行已变化，请刷新后重新定位')
+    e=core.require_evidence(p,eid);d=core.find(p,'documents',e['document_id'])
+    if e.get('method')!='local_ocr' or not d['name'].lower().endswith('.pdf'):
+        raise HTTPException(422,'原行定位只支持本地OCR的PDF证据')
+    if e.get('document_hash')!=d['hash'] or ocr_origin(p,e,{}) is None:
+        raise HTTPException(409,'扫描识别来源已变化，请重新读取当前结果')
+    digest=store.digest(e)
+    if body.evidence_hash is not None and body.evidence_hash!=digest:
+        raise HTTPException(409,'扫描候选依据已变化，请重新读取候选')
+    lines=e['ocr']['lines']
+    if type(number) is not int or number<1 or number>len(lines):raise HTTPException(422,'识别行号超出当前结果范围')
+    line=lines[number-1]
+    if body.expected_line!={k:line[k] for k in ('text','bbox','confidence')}:
+        raise HTTPException(409,'所选识别原行已变化，请刷新后重新定位')
+    if verify_bytes:
         original_bytes(d)
         region=page_region(d,{'page':e['page'],'bbox':line['bbox'],'coordinate_space':SPACE,'document_hash':d['hash']})
         if region['page_geometry']!=e.get('page_geometry'):
             raise HTTPException(409,'识别页的旋转或裁切依据失配，请重新识别当前原页')
-        return {'document_id':d['id'],'document_hash':d['hash'],'document_name':d['name'],
-                'evidence_id':e['id'],'evidence_hash':digest,'page':e['page'],'line':number,
-                'text':line['text'],'confidence':line['confidence'],'engine':e['ocr']['engine'],
-                'revision':e['ocr']['revision'],**region,
-                'notice':'此框只定位机器识别原行；须核对原图，位置和置信度均不能作为工程尺寸或准确率。'}
+    else:
+        region={'bbox':line['bbox'],'coordinate_space':SPACE,'page_geometry':e.get('page_geometry')}
+    return {'document_id':d['id'],'document_hash':d['hash'],'document_name':d['name'],
+            'evidence_id':e['id'],'evidence_hash':digest,'page':e['page'],'line':number,
+            'text':line['text'],'confidence':line['confidence'],'engine':e['ocr']['engine'],
+            'revision':e['ocr']['revision'],**region,
+            'notice':'此框只定位机器识别原行；须核对原图，位置和置信度均不能作为工程尺寸或准确率。'}
+
+
+@router.post('/projects/{pid}/evidence/{eid}/ocr-lines/{number}/locate')
+def locate_line(pid: str, eid: str, body: LineLocationIn,
+                number: int = PathParam(ge=1, le=2000), a=Depends(core.actor)):
+    """Read-only POST keeps recognized text out of URL/access logs."""
+    with store.connect() as c:
+        return verified_line_location(core.project(c,pid,a),eid,number,body)

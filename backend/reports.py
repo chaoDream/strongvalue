@@ -135,6 +135,13 @@ def tables(p, q, approved):
               ('审核记录', ['对象类型', '对象 ID', '决定', '复核人', '时间', '依据', '对象哈希'],
                [[r['collection'], r['object_id'], r['decision'], r['reviewer'], r['timestamp'], r['reason'], r['object_hash']] for r in snapshot['reviews']+report_reviews]),
               ('缺项与警示', ['事项'], [[x] for x in ((q['warnings'] if q else [])+(['当前版本已失效；源输入已变更'] if q and q['id'] in p['stale_quotes'] else []))])]
+    transcriptions=[e for e in snapshot['evidence'] if e.get('ocr_transcription')]
+    if transcriptions:
+        result.append(('扫描原行人工抄录',['人工证据 / 来源行','机器原文','人工核对文字','核对依据','核对人 / 时间','原件及位置'],
+            [[e['id']+' / '+t['source_location']['evidence_id']+' 第'+str(t['source_location']['line'])+'行',
+              t['original_line']['text'],e['text'],t['reason'],t['created_by']+' / '+t['created_at'],
+              e['document_hash']+' / 第'+str(e['page'])+'页 / '+str(e['bbox'])]
+             for e in transcriptions for t in [e['ocr_transcription']]]))
     if snapshot.get('facts'):
         fact_states={'draft':'待复核','approved':'已审定','rejected':'不采纳','superseded':'历史替代','conflict':'存在冲突','stale':'需重新复核','needs_info':'待补依据'}
         result.insert(1,('项目事实与冲突候选', ['字段 / 候选ID','原始值 / 单位','标准值 / 单位','候选类别 / 审核状态','来源文件 / 页码','证据ID / 原文'],

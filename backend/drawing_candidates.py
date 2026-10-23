@@ -89,10 +89,15 @@ def candidates(p):
         d=docs.get(e['document_id'])
         if not d or e.get('method') not in ('local_text','manual','local_ocr') or e.get('document_hash')!=d['hash']:continue
         if d['name'].lower().endswith('.pdf') and (type(e.get('page')) is not int or e['page']<1):continue
+        if 'ocr_transcription' in e:
+            from .ocr_transcriptions import validate_transcription
+            try:validate_transcription(p,e,verify_bytes=False)
+            except HTTPException:continue
         result=identity_fields(e['text'])
         if not result:continue
         ocr=ocr_origin(p,e,result['fields']) if e.get('method')=='local_ocr' else None
         if e.get('method')=='local_ocr' and ocr is None:continue
+        if 'ocr_transcription' in e:result['transcription']=e['ocr_transcription']
         if ocr:result.update(ocr=ocr,warnings=[ocr['notice'],*result['warnings']])
         out.append({'id':store.digest({'version':VERSION,'document_id':d['id'],'evidence_id':e['id']})[:32],
                     'parser_version':VERSION,'document_id':d['id'],'document_hash':d['hash'],'document_name':d['name'],
