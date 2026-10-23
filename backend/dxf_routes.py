@@ -113,12 +113,14 @@ def evaluate(p,did,cid,body):
 
 
 @router.get('/projects/{pid}/documents/{did}/dxf-route-candidates')
-def read(pid:str,did:str,layer:str=Query('',max_length=2000),offset:int=Query(0,ge=0),limit:int=Query(50,ge=1,le=200),a=Depends(core.actor)):
+def read(pid:str,did:str,layer:str=Query('',max_length=2000),offset:int=Query(0,ge=0),limit:int=Query(50,ge=1,le=200),projection:Literal['xy','xz','yz']='xz',a=Depends(core.actor)):
     with store.connect() as conn:
         p=core.project(conn,pid,a);doc,data,items=rows(p,did)
         layers=sorted({r['layer'] for r in items});items=[r for r in items if not layer or r['layer']==layer]
-        return {'document_name':doc['name'],'unit':data['unit'],'insunits':data['insunits'],'layers':layers,'ignored':data['ignored'],'notice':data['notice'],
-                'total':len(items),'offset':offset,'limit':limit,'candidates':[{**r,'object_hash':store.digest(r)} for r in items[offset:offset+limit]]}
+        from .dxf_projection import project
+        batch=items[offset:offset+limit]
+        return {'scene':project(batch,projection),'document_name':doc['name'],'unit':data['unit'],'insunits':data['insunits'],'layers':layers,'ignored':data['ignored'],'notice':data['notice'],
+                'total':len(items),'offset':offset,'limit':limit,'candidates':[{**r,'object_hash':store.digest(r)} for r in batch]}
 
 
 @router.post('/projects/{pid}/documents/{did}/dxf-route-assembly')
