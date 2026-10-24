@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from . import store
 from .engine import GEOMETRIES, DomainError, number, precise, quantity_number, takeoff
 
-STRUCTURED_KINDS = ('compound','planar_regions','polygon_region','spatial_regions','surface_faces','design_route','station_trench','volume_balance','pipe_envelope','route_bedding','circular_chamber','chamber_plate','polygon_railing','railing_material','post_foundation','foundation_formwork','foundation_void_formwork')
+STRUCTURED_KINDS = ('compound','planar_regions','polygon_region','spatial_regions','surface_faces','design_route','station_trench','volume_balance','pipe_envelope','route_bedding','circular_chamber','chamber_plate','polygon_railing','railing_material','post_foundation','foundation_formwork','foundation_void_formwork','foundation_horizontal_formwork')
 VERSION = 'compound-geometry-1.0'
 PI = '3.1415926535897932384626433832795028841971693993751'
 
@@ -132,6 +132,9 @@ def validate(p, comp, saved=False):
 
 
 def structured_validator(kind):
+    if kind == 'foundation_horizontal_formwork':
+        from .foundation_horizontal_formwork import validate as validate_horizontal_formwork
+        return validate_horizontal_formwork
     if kind == 'foundation_void_formwork':
         from .foundation_void_formwork import validate as validate_void_formwork
         return validate_void_formwork
@@ -184,6 +187,9 @@ def structured_validator(kind):
 
 
 def component_quantity(comp):
+    if comp['kind'] == 'foundation_horizontal_formwork':
+        from .foundation_horizontal_formwork import calculate as calculate_horizontal_formwork
+        return calculate_horizontal_formwork(comp)
     if comp['kind'] == 'foundation_void_formwork':
         from .foundation_void_formwork import calculate as calculate_void_formwork
         return calculate_void_formwork(comp)

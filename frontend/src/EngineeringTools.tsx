@@ -22,6 +22,7 @@ const VolumeBalancePanel=React.lazy(()=>import('./VolumeBalancePanel'));
 const TrenchTakeoffPanel=React.lazy(()=>import('./TrenchTakeoffPanel'));
 const DXFRoutesPanel=React.lazy(()=>import('./DXFRoutesPanel'));
 const RouteTakeoffPanel=React.lazy(()=>import('./RouteTakeoffPanel'));
+const FoundationHorizontalFormworkPanel=React.lazy(()=>import('./FoundationHorizontalFormworkPanel'));
 const FoundationVoidFormworkPanel=React.lazy(()=>import('./FoundationVoidFormworkPanel'));
 const FoundationFormworkPanel=React.lazy(()=>import('./FoundationFormworkPanel'));
 const PostFoundationPanel=React.lazy(()=>import('./PostFoundationPanel'));
@@ -137,7 +138,7 @@ export default function EngineeringTools({section,p,user,request,refresh,onRevie
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取CAD坐标…</p>}><DXFRoutesPanel key={p.id} p={p} user={user} request={request} refresh={refresh}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取设计管线…</p>}><RouteTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取空间构件…</p>}><SpatialTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
-  {section==='takeoff'&&<React.Suspense fallback={<p>正在读取栏杆材料表…</p>}><FoundationVoidFormworkPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/><FoundationFormworkPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/><PostFoundationPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/><RailingMaterialPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
+  {section==='takeoff'&&<React.Suspense fallback={<p>正在读取栏杆材料表…</p>}><FoundationHorizontalFormworkPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/><FoundationVoidFormworkPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/><FoundationFormworkPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/><PostFoundationPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/><RailingMaterialPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取栏杆计长…</p>}><RailingTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取表面算量…</p>}><SurfaceTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
   {section==='takeoff'&&<React.Suspense fallback={<p>正在读取设计多边形…</p>}><PolygonTakeoffPanel p={p} user={user} request={request} refresh={refresh} onReview={onReview} sourceLink={sourceLink}/></React.Suspense>}
