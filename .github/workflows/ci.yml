@@ -5,9 +5,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Check maintained user guide
+        run: python scripts/check_user_guide.py
+        env:
+          USER_GUIDE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
