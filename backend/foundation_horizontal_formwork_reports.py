@@ -2,7 +2,7 @@
 TITLES = ('基础顶底模板面积汇总','基础顶底逐面接触净量','基础顶底实际孔扣减','基础顶底接触范围原件','基础顶底模板做法与规则')
 
 
-def tables(snapshot):
+def legacy_tables(snapshot):
     ts = [t for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary')]
     if not ts: return []
     rows = [(t,d) for t in ts for d in t['contact_ranges']]
@@ -18,3 +18,26 @@ def tables(snapshot):
         (TITLES[4], ['模板','材料做法、原件及计量规则'],
          [[t['name'],t['material']+'；做法原件：'+t['source_evidence']['horizontal_formwork.material']+'；'+t['notice']+'；'+t['rule_version']+('；π='+t['horizontal_formwork_pi_constant'] if 'horizontal_formwork_pi_constant' in t else '')] for t in ts])
     ]
+
+
+STEP_TITLES = ('基础台阶平台截面差','基础台阶平台孔交集')
+
+
+def tables(snapshot):
+    result = legacy_tables(snapshot)
+    rows = [(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d['face']=='step']
+    if not rows: return result
+    # Keep the five existing sheets and stored numbers; broaden their labels only in ledge exports.
+    result[0][1][1] = '选入水平整面数'
+    result[1][1][1:3] = ['接触水平面 / Z（m）','所取下层真实尺寸（m）']
+    result[2][1][3:5] = ['每基础本面孔扣减（m²）','本面扣减口径与孔原件']
+    for row in result[2][2]:
+        if '台阶中间整个平台' in row[0]:
+            row[4] = row[4].replace('起Z≤底面Z<止Z；物理孔全截面扣减，体积阈值不填实','起Z<平台Z≤止Z；仅扣外露平台内孔面积，详见平台孔交集；体积阈值不填实')
+    result.extend([
+        (STEP_TITLES[0], ['模板 / 平台','下层 / 上层 / Z（m）','下层 / 上层尺寸（m）','单基础下层 / 上层 / 平台毛面积（m²）'],
+         [[t['name']+' / C'+str(d['index'])+' '+d['name'],'L'+str(d['level_index'])+' / L'+str(d['upper_level_index'])+' / '+d['z'],'下层：'+'；'.join(k+'='+v for k,v in d['normalized_parameters'].items())+'；上层：'+'；'.join(k+'='+v for k,v in d['upper_normalized_parameters'].items()),d['single_lower_area']+' / '+d['single_upper_area']+' / '+d['single_gross_area']] for t,d in rows]),
+        (STEP_TITLES[1], ['模板 / 平台 / 孔','全孔 / 上层覆盖交集（m²）','单基础平台内实际孔扣减（m²）','精确交集口径'],
+         [[t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index'])+' '+h['name'],h['full_area']+' / '+h['covered_area'],h['single_area'],h['intersection_rule']+'；全孔减上层覆盖交集；起Z<平台Z≤止Z；上层名义截面内孔底不计入平台'] for t,d in rows for h in d['apertures']] or [['—','0 / 0','0','所选平台下侧无到达本标高的孔；不扣未到达的盲孔或从平台起孔']])
+    ])
+    return result

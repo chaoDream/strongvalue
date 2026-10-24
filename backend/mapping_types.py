@@ -15,7 +15,7 @@ TYPES.update({
     'planar_regions': {'label': '平面区域并集与扣减', 'profiles': [profile('area', '平面净面积', 'm²'), profile('volume', '等厚平面净实体体积', 'm³')]},
     'polygon_region': {'label': '水平设计多边形与扣孔', 'profiles': [profile('area', '多边形扣孔后净面积', 'm²'), profile('volume', '多边形等厚净实体体积', 'm³')]},
     'spatial_regions': {'label': '空间长方体并集与扣减', 'profiles': [profile('volume', '空间净实体体积', 'm³')]},
-    'foundation_horizontal_formwork': {'label':'立柱基础整体顶底模板','profiles':[profile('area','基础已选整体顶面或底面实际接触净面积','m²')]},
+    'foundation_horizontal_formwork': {'label':'立柱基础水平接触模板','profiles':[profile('area','基础已选整体顶底面或台阶平台实际接触净面积','m²')]},
     'foundation_void_formwork': {'label':'立柱基础孔壁模板','profiles':[profile('area','基础已选竖直孔壁实际接触净面积','m²')]},
     'foundation_formwork': {'label':'立柱基础外侧模板','profiles':[profile('area','基础已选竖直外侧实际接触净面积','m²')]},
     'post_foundation': {'label':'栏杆立柱独立基础','profiles':[profile('volume','立柱独立基础实体体积（矩形/圆柱/同心台阶）','m³')]},
