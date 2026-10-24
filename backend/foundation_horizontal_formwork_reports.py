@@ -68,12 +68,12 @@ def end_tables(snapshot):
         (END_TITLES[0], ['模板 / 范围 / 孔','孔端 / Z / 混凝土侧层','所选孔原始尺寸及标高','每基础全孔 / 与侧层交集 / 相接孔扣 / 净（m²）','裁切口径及孔原件'],
          [[t['name']+' / C'+str(d['index'])+' '+d['name']+' / H'+str(d['hole_index'])+' '+d['hole_name'],d['face_label']+' / Z='+d['z']+'m / '+('下侧' if d['concrete_side']=='below' else '上侧')+'L'+str(d['level_index']),
            '；'.join(k+'='+str(v) for k,v in d['hole_parameters'].items())+' '+d['hole_unit']+'；孔Z='+d['hole_from_z']+'至'+d['hole_to_z']+'m',
-           d['single_full_hole_area']+' / '+d['single_gross_area']+' / '+d['single_opening_area']+' / '+d['single_net_area'],d['hole_end_intersection_rule']+'；毛面积仅取所选孔与混凝土侧层交集；'+ '；'.join(k+'：'+v for k,v in t['source_evidence'].items() if k.startswith('foundation.'+str(d['material_index'])+'.holes.'+str(d['hole_index'])+'.'))] for t,d in rows]),
+           d['single_full_hole_area']+' / '+d['single_gross_area']+' / '+d['single_opening_area']+' / '+d['single_net_area'],d['hole_end_intersection_rule']+('；本次毛面积另与XY窗口相交，整孔端交集见窗口表；' if d.get('hole_end_window') else '；毛面积仅取所选孔与混凝土侧层交集；')+ '；'.join(k+'：'+v for k,v in t['source_evidence'].items() if k.startswith('foundation.'+str(d['material_index'])+'.holes.'+str(d['hole_index'])+'.'))] for t,d in rows]),
         (END_TITLES[1], ['模板 / 孔端 / 相接孔','相接孔原始尺寸及Z','每基础相接孔全截面 / 实际交集（m²）','交集及混凝土侧规则'],
          [[t['name']+' / C'+str(d['index'])+' H'+str(d['hole_index'])+' / H'+str(h['hole_index'])+' '+h['name'],'；'.join(k+'='+str(v) for k,v in h['parameters'].items())+' '+h['unit']+'；Z='+h['from_z']+'至'+h['to_z']+'m',h['full_area']+' / '+h['single_area'],h['intersection_rule']+'；'+('相接孔起Z<孔底Z≤相接孔止Z' if d['face']=='hole_bottom' else '相接孔起Z≤孔顶Z<相接孔止Z')+'；扣与所选孔交集，不扣整层或整相接孔'] for t,d in rows for h in d['apertures']] or [['—','—','0 / 0','所选孔端混凝土侧无其他孔，不另扣减']])
     ])
-    curves = [(t,d,'混凝土侧层裁切',d['single_gross_area'],d['hole_end_curved_intersection']) for t,d in rows if d.get('hole_end_curved_intersection')]
-    curves += [(t,d,'相接孔H'+str(h['hole_index']),h['single_area'],h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
+    curves = [(t,d,'混凝土侧层裁切',d['full_face_area'] if d.get('hole_end_window') else d['single_gross_area'],d['hole_end_curved_intersection']) for t,d in rows if d.get('hole_end_curved_intersection')]
+    curves += [(t,d,'相接孔H'+str(h['hole_index']),h.get('window_direct_area',h['single_area']),h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
     if curves:
         labels = dict(radius='圆半径',chord_distance='有向弦距',half_chord='半弦长',minor_half_angle='小弓形半角',x='相对X',y='相对Y',x_from='区间X起',x_to='区间X止')
         result.append((END_CURVED_TITLE,['模板 / 孔端 / 裁切对象','解析分项','参数（长度m / 角rad）','分项有向面积（m²）','合成及精度'],[
@@ -95,10 +95,10 @@ def window_tables(snapshot):
     # These are the original, unsplit stored rows; use face identity, never names.
     all_holes=[(t,d,h) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] for h in d['apertures']]
     for row,(t,d,h) in zip(result[2][2],all_holes):
-        if 'plan_range' in d:row[4]='仅扣到达本端面且与XY窗口相交的实际孔截面；详见窗口孔交集；体积阈值不填实物理孔'
+        if 'plan_range' in d:row[4]=('仅扣所选孔与同侧相接孔及XY窗口交集；详见孔端窗口表' if d.get('hole_end_window') else '仅扣到达本端面且与XY窗口相交的实际孔截面；详见窗口孔交集')+'；体积阈值不填实物理孔'
     result.extend([
         (WINDOW_TITLES[0],['模板 / 范围 / 端面','XY窗口范围（m）','每基础全端面 / 窗口 / 实际毛交集（m²）','每基础孔扣 / 净（m²）','实际裁切口径'],[
-            [t['name']+' / C'+str(d['index'])+' '+d['name']+' / '+d['face_label'],'X '+d['x_start']+'至'+d['x_end']+'；Y '+d['y_start']+'至'+d['y_end'],d['full_face_area']+' / '+d['window_area']+' / '+d['single_gross_area'],d['single_opening_area']+' / '+d['single_net_area'],d['window_intersection_rule']+'；只取窗口与真实端层交集，孔仅按窗口内部分扣减'] for t,d in rows]),
+            [t['name']+' / C'+str(d['index'])+' '+d['name']+' / '+d['face_label'],'X '+d['x_start']+'至'+d['x_end']+'；Y '+d['y_start']+'至'+d['y_end'],d['full_face_area']+' / '+d['window_area']+' / '+d['single_gross_area'],d['single_opening_area']+' / '+d['single_net_area'],d['window_intersection_rule']+('；所选孔与混凝土侧层共同裁切，同侧相接孔再与所选孔及窗口相交' if d.get('hole_end_window') else '；只取窗口与真实端层交集，孔仅按窗口内部分扣减')] for t,d in rows]),
         (WINDOW_TITLES[1],['模板 / 窗口 / 孔','孔全截面 / 与窗口交集（m²）','交集口径'],[
             [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index'])+' '+h['name'],h['full_area']+' / '+h['single_area'],h['intersection_rule']+'；按该端面起止Z条件取孔，再与窗口裁切'] for t,d in rows for h in d['apertures']] or [['—','0 / 0','所选端面无到达本标高的孔']]),
         (WINDOW_TITLES[2],['模板 / 窗口','原始坐标及单位','逐坐标原件','共用基础XY基准及原件'],[
@@ -107,7 +107,7 @@ def window_tables(snapshot):
             [t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],c['x_gap']+' / '+c['y_gap'],('分离' if c['state']=='separated' else '共享边界')+'；X/Y均正交叠即拒绝，整面与窗口也不能并计'] for t in ts for c in t['horizontal_window_checks']] or [['—','—','无同端面窗口对；已检查整面与窗口不重复']])
     ])
     curves=[(t,d,'下层与窗口' if d['face']=='step' else '端层截面',d['window_lower_area'] if d['face']=='step' else d['single_gross_area'],d['window_curved_intersection']) for t,d in rows if d.get('window_curved_intersection')]
-    curves += [(t,d,('上层窗口内孔H' if d['face']=='step' else '实际孔H')+str(h['hole_index']),h['covered_area'] if d['face']=='step' else h['single_area'],h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
+    curves += [(t,d,('上层窗口内孔H' if d['face']=='step' else '实际孔H')+str(h['hole_index']),h['covered_area'] if d['face']=='step' else h.get('window_direct_area',h['single_area']),h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
     curves += [(t,d,'窗口内全孔H'+str(h['hole_index']),h['window_hole_area'],h['window_hole_curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('window_hole_curved_intersection')]
     curves += [(t,d,'上层与窗口',d['window_upper_area'],d['window_upper_curved_intersection']) for t,d in rows if d.get('window_upper_curved_intersection')]
     if curves:
@@ -149,7 +149,7 @@ ROUND_WINDOW_TITLE = '基础圆平台窗口分段积分'
 def tables(snapshot):
     result=step_window_tables(snapshot)
     rows=[(t,d,h,h['curved_intersection']) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d.get('round_step_window') for h in d['apertures'] if h.get('curved_intersection',{}).get('integration_rule')]
-    result=coverage_tables(snapshot,result)
+    result=hole_end_window_tables(snapshot,coverage_tables(snapshot,result))
     if not rows:return result
     result.append((ROUND_WINDOW_TITLE,['模板 / 平台窗口 / 孔','区间 / X起止（m）','有效上边界 / 下边界','区间共同面积（m²）','共同交集及精度'],[
         [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index']),q['name']+' / '+q['x_from']+'至'+q['x_to'],q['upper_boundary']+' / '+q['lower_boundary'],q['area'],h['covered_area']+'；'+m['integration_rule']+'；工作200位、保留80位、固定π见规则'] for t,d,h,m in rows for q in m['terms']]))
@@ -164,4 +164,23 @@ def coverage_tables(snapshot,result):
     if proofs:
         result.append((ROUND_COVERAGE_TITLE,['模板 / 平台窗口 / 孔','区间X起止（m）','平台下边界 / 上边界','孔下 / 上包含余量（m）','几何包含口径'],[
             [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index']),q['x_from']+'至'+q['x_to'],q['lower_boundary']+' / '+q['upper_boundary'],q['lower_margin']+' / '+q['upper_margin'],m['method']+'；工作200位；每个区间无边界交点，中点只作包含见证，原始公式见JSON'] for t,d,h,m in proofs for q in (m['terms'] or [dict(x_from=d['x_start'],x_to=d['x_end'],lower_boundary='无外露平台',upper_boundary='无外露平台',lower_margin='0',upper_margin='0')])]))
+    return result
+
+
+HOLE_WINDOW_TITLES = ('基础孔端窗口交集','基础孔端窗口分段积分','基础孔端窗口覆盖校验')
+
+
+def hole_end_window_tables(snapshot,result):
+    rows=[(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d.get('hole_end_window')]
+    if not rows:return result
+    result.append((HOLE_WINDOW_TITLES[0],['模板 / 孔端窗口','所选孔 / 混凝土侧层 / Z','整孔端交集 / 窗口毛 / 实扣 / 净（m²）','交集与相接孔口径'],[
+        [t['name']+' / C'+str(d['index'])+' '+d['name'],'H'+str(d['hole_index'])+' / '+('下侧' if d['concrete_side']=='below' else '上侧')+'L'+str(d['level_index'])+' / '+d['z'],d['full_face_area']+' / '+d['single_gross_area']+' / '+d['single_opening_area']+' / '+d['single_net_area'],'毛=所选孔∩混凝土侧层∩窗口；扣=所选孔∩同侧相接孔∩窗口；相接孔在侧层内且互不重叠；同孔同端面重复校验'] for t,d in rows]))
+    traces=[(t,d,'所选孔与侧层窗口毛交集',d['single_gross_area'],d['window_curved_intersection']) for t,d in rows]
+    traces += [(t,d,'相接孔H'+str(h['hole_index'])+'；实际扣='+h['single_area'],h['window_direct_area'],h['curved_intersection']) for t,d in rows for h in d['apertures']]
+    result.append((HOLE_WINDOW_TITLES[1],['模板 / 孔端窗口 / 对象','区间X起止（m）','有效下边界 / 上边界','分段面积 / 直接积分合计（m²）','解析规则与精度'],[
+        [t['name']+' / C'+str(d['index'])+' / '+target,q['x_from']+'至'+q['x_to'],q['lower_boundary']+' / '+q['upper_boundary'],q['area']+' / '+total,m['integration_rule']+'；工作200位、保留80位；固定π见规则；覆盖恒等式实际扣另列，原始AST见JSON'] for t,d,target,total,m in traces for q in m['terms']] or [['—','—','—','0 / 0','无正面积交集']]))
+    proofs=[(t,d,d['hole_end_window_coverage']) for t,d in rows if d.get('hole_end_window_coverage')]
+    if proofs:
+        result.append((HOLE_WINDOW_TITLES[2],['模板 / 孔端窗口','区间X起止 / 中点（m）','毛交集下边界 / 上边界','完整覆盖的同侧相接孔','几何分割口径'],[
+            [t['name']+' / C'+str(d['index']),q['x_from']+'至'+q['x_to']+' / '+q['x_mid'],q['lower_boundary']+' / '+q['upper_boundary'],'；'.join('H'+str(v['hole_index'])+' '+v['lower_boundary']+'至'+v['upper_boundary']+'；中点下/上='+v['lower']+'/'+v['upper']+'；接续间隙='+v['join_gap'] for v in q['pieces']),m['method']+'；分割余项H'+str(m['canonical_hole_index'])+'=毛−其他孔扣；各孔直接积分另存，原始AST见JSON'] for t,d,m in proofs for q in m['terms']]))
     return result

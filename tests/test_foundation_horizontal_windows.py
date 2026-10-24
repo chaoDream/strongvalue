@@ -104,7 +104,7 @@ def test_strict_window_schema_and_claims(fault):
     elif fault=='non-number':c['parameters']['x_start']=True
     elif fault=='manual-area':d['area']='1'
     elif fault=='invalid-step':d.update(face='step',level_index=999)
-    elif fault=='hole-end':d.update(face='hole_top',hole_index=1)
+    elif fault=='hole-end':d.update(face='hole_top',hole_index=999)
     elif fault=='same-face':b['contact_ranges'].append({**copy.deepcopy(d),'name':'重叠'})
     elif fault=='full-face':b['contact_ranges'].append(contact(face='bottom',name='整面重叠'))
     else:

@@ -88,6 +88,7 @@ def checks(rows):
         for b in rows[:i]:
             if not enabled(b) or a['material_index']!=b['material_index'] or a['face']!=b['face']:continue
             if a['face']=='step' and a['level_index']!=b['level_index']:continue
+            if a['face'] in ('hole_bottom','hole_top') and a['hole_index']!=b['hole_index']:continue
             values={};nodes={}
             for axis in ('x','y'):
                 al,ah=(Decimal(a['plan_bounds'][axis+'_'+k]) for k in ('start','end'));bl,bh=(Decimal(b['plan_bounds'][axis+'_'+k]) for k in ('start','end'))

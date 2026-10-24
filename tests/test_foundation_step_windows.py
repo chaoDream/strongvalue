@@ -100,7 +100,7 @@ def test_three_levels_same_xy_are_distinct_platforms_and_zero_equal_tiers():
 def test_unsupported_geometry_and_duplicate_frame_guards(fault):
     s=source();b=body(s);d=b['contact_ranges'][0]
     if fault=='rotated-window':d['plan_range']['rotation']='1'
-    elif fault=='hole-end':d.update(face='hole_top',hole_index=1);d.pop('level_index')
+    elif fault=='hole-end':d.update(face='hole_top',hole_index=999);d.pop('level_index')
     elif fault=='full-before':b['contact_ranges'].insert(0,{**contact(),'name':'完整平台'})
     elif fault=='full-after':b['contact_ranges'].append({**contact(),'name':'完整平台'})
     elif fault=='missing-upper':d['level_index']=2
