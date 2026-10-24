@@ -96,10 +96,10 @@ def test_three_levels_same_xy_are_distinct_platforms_and_zero_equal_tiers():
     s['foundation_items'][0]['levels'][1]['parameters'].update(length='600',width='500');r=calculate(body(s),s);assert r['quantity']=='0.000';check(r)
 
 
-@pytest.mark.parametrize('fault',['circle','hole-end','full-before','full-after','overlap','basis','proof','missing-upper','manual-gross'])
+@pytest.mark.parametrize('fault',['rotated-window','hole-end','full-before','full-after','overlap','basis','proof','missing-upper','manual-gross'])
 def test_unsupported_geometry_and_duplicate_frame_guards(fault):
     s=source();b=body(s);d=b['contact_ranges'][0]
-    if fault=='circle':s=source('stepped_circular');b=body(s)
+    if fault=='rotated-window':d['plan_range']['rotation']='1'
     elif fault=='hole-end':d.update(face='hole_top',hole_index=1);d.pop('level_index')
     elif fault=='full-before':b['contact_ranges'].insert(0,{**contact(),'name':'完整平台'})
     elif fault=='full-after':b['contact_ranges'].append({**contact(),'name':'完整平台'})

@@ -43,9 +43,9 @@ def step_tables(snapshot):
     ])
     curves = [(t,d,h) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
     if curves:
-        labels = dict(radius='圆半径',chord_distance='有向弦距',half_chord='半弦长',minor_half_angle='小弓形半角',x='相对X',y='相对Y')
+        labels = dict(radius='圆半径',chord_distance='有向弦距',half_chord='半弦长',minor_half_angle='小弓形半角',x='相对X',y='相对Y',x_from='区间X起',x_to='区间X止')
         result.append((CURVED_TITLE,['模板 / 平台 / 孔','解析分项','参数（长度m / 角rad）','分项有向面积（m²）','合成口径及计算精度'],[
-            [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index']),q['name'],'；'.join(label+'='+q[k] for k,label in labels.items() if k in q),q['area'],h['curved_intersection']['method']+'；工作'+str(h['curved_intersection']['working_digits'])+'位，保留'+str(h['curved_intersection']['output_digits'])+'位；固定π见模板规则；弦距负取大弓形；象限分项按右上−左上−右下＋左下组合；交集='+h['covered_area']+'m²'] for t,d,h in curves for q in h['curved_intersection']['terms']]))
+            [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index']),q['name'],'；'.join(label+'='+q[k] for k,label in labels.items() if k in q),q['area'],h['curved_intersection']['method']+'；工作'+str(h['curved_intersection']['working_digits'])+'位，保留'+str(h['curved_intersection']['output_digits'])+'位；固定π见模板规则；'+h['curved_intersection'].get('integration_rule','弦距负取大弓形；象限分项按右上−左上−右下＋左下组合；')+'交集='+h['covered_area']+'m²'] for t,d,h in curves for q in h['curved_intersection']['terms']]))
     return result
 
 
@@ -75,7 +75,7 @@ def end_tables(snapshot):
     curves = [(t,d,'混凝土侧层裁切',d['single_gross_area'],d['hole_end_curved_intersection']) for t,d in rows if d.get('hole_end_curved_intersection')]
     curves += [(t,d,'相接孔H'+str(h['hole_index']),h['single_area'],h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
     if curves:
-        labels = dict(radius='圆半径',chord_distance='有向弦距',half_chord='半弦长',minor_half_angle='小弓形半角',x='相对X',y='相对Y')
+        labels = dict(radius='圆半径',chord_distance='有向弦距',half_chord='半弦长',minor_half_angle='小弓形半角',x='相对X',y='相对Y',x_from='区间X起',x_to='区间X止')
         result.append((END_CURVED_TITLE,['模板 / 孔端 / 裁切对象','解析分项','参数（长度m / 角rad）','分项有向面积（m²）','合成及精度'],[
             [t['name']+' / C'+str(d['index'])+' H'+str(d['hole_index'])+' / '+target,q['name'],'；'.join(label+'='+q[k] for k,label in labels.items() if k in q),q['area'],m['method']+'；工作'+str(m['working_digits'])+'位，保留'+str(m['output_digits'])+'位；固定π见模板规则；交集='+covered+'m²'] for t,d,target,covered,m in curves for q in m['terms']]))
     return result
@@ -106,12 +106,13 @@ def window_tables(snapshot):
         (WINDOW_TITLES[3],['模板 / 两窗口','X / Y有向间隔（m）','状态及重复检查口径'],[
             [t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],c['x_gap']+' / '+c['y_gap'],('分离' if c['state']=='separated' else '共享边界')+'；X/Y均正交叠即拒绝，整面与窗口也不能并计'] for t in ts for c in t['horizontal_window_checks']] or [['—','—','无同端面窗口对；已检查整面与窗口不重复']])
     ])
-    curves=[(t,d,'端层截面',d['single_gross_area'],d['window_curved_intersection']) for t,d in rows if d.get('window_curved_intersection')]
+    curves=[(t,d,'下层与窗口' if d['face']=='step' else '端层截面',d['window_lower_area'] if d['face']=='step' else d['single_gross_area'],d['window_curved_intersection']) for t,d in rows if d.get('window_curved_intersection')]
     curves += [(t,d,('上层窗口内孔H' if d['face']=='step' else '实际孔H')+str(h['hole_index']),h['covered_area'] if d['face']=='step' else h['single_area'],h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
     curves += [(t,d,'窗口内全孔H'+str(h['hole_index']),h['window_hole_area'],h['window_hole_curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('window_hole_curved_intersection')]
+    curves += [(t,d,'上层与窗口',d['window_upper_area'],d['window_upper_curved_intersection']) for t,d in rows if d.get('window_upper_curved_intersection')]
     if curves:
-        labels=dict(radius='圆半径',x='相对X',y='相对Y')
-        result.append((WINDOW_CURVED_TITLE,['模板 / 窗口 / 对象','象限分项','参数（m）','分项有向面积（m²）','合成与精度'],[
+        labels=dict(radius='圆半径',x='相对X',y='相对Y',x_from='区间X起',x_to='区间X止')
+        result.append((WINDOW_CURVED_TITLE,['模板 / 窗口 / 对象','解析分项' if any(m.get('integration_rule') for *_,m in curves) else '象限分项','参数（m）','分项有向面积（m²）','合成与精度'],[
             [t['name']+' / C'+str(d['index'])+' / '+target,q['name'],'；'.join(label+'='+q[k] for k,label in labels.items() if k in q),q['area'],m['method']+'；工作200位，保留80位，固定π见规则；交集='+covered+'m²'] for t,d,target,covered,m in curves for q in m['terms']]))
     return result
 
@@ -119,7 +120,7 @@ def window_tables(snapshot):
 STEP_WINDOW_TITLES = ('基础平台窗口截面差','基础平台窗口孔裁切')
 
 
-def tables(snapshot):
+def step_window_tables(snapshot):
     result = window_tables(snapshot)
     rows = [(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d['face']=='step' and 'plan_range' in d]
     if not rows: return result
@@ -139,4 +140,28 @@ def tables(snapshot):
         (STEP_WINDOW_TITLES[1],['模板 / 平台窗口 / 孔','全孔 / 孔∩窗口（m²）','孔∩上层∩窗口 / 平台窗口实际孔扣（m²）','共同交集口径'],[
             [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index'])+' '+h['name'],h['full_area']+' / '+h['window_hole_area'],h['covered_area']+' / '+h['single_area'],h['intersection_rule']+'；体积扣孔阈值不填实物理孔'] for t,d in rows for h in d['apertures']] or [['—','0 / 0','0 / 0','平台下侧无到达本标高的孔']])
     ])
+    return result
+
+
+ROUND_WINDOW_TITLE = '基础圆平台窗口分段积分'
+
+
+def tables(snapshot):
+    result=step_window_tables(snapshot)
+    rows=[(t,d,h,h['curved_intersection']) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d.get('round_step_window') for h in d['apertures'] if h.get('curved_intersection',{}).get('integration_rule')]
+    result=coverage_tables(snapshot,result)
+    if not rows:return result
+    result.append((ROUND_WINDOW_TITLE,['模板 / 平台窗口 / 孔','区间 / X起止（m）','有效上边界 / 下边界','区间共同面积（m²）','共同交集及精度'],[
+        [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index']),q['name']+' / '+q['x_from']+'至'+q['x_to'],q['upper_boundary']+' / '+q['lower_boundary'],q['area'],h['covered_area']+'；'+m['integration_rule']+'；工作200位、保留80位、固定π见规则'] for t,d,h,m in rows for q in m['terms']]))
+    return result
+
+
+ROUND_COVERAGE_TITLE = '基础圆平台窗口全覆校验'
+
+
+def coverage_tables(snapshot,result):
+    proofs=[(t,d,h,h['exposed_coverage']) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d.get('round_step_window') for h in d['apertures'] if h.get('exposed_coverage') is not None]
+    if proofs:
+        result.append((ROUND_COVERAGE_TITLE,['模板 / 平台窗口 / 孔','区间X起止（m）','平台下边界 / 上边界','孔下 / 上包含余量（m）','几何包含口径'],[
+            [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index']),q['x_from']+'至'+q['x_to'],q['lower_boundary']+' / '+q['upper_boundary'],q['lower_margin']+' / '+q['upper_margin'],m['method']+'；工作200位；每个区间无边界交点，中点只作包含见证，原始公式见JSON'] for t,d,h,m in proofs for q in (m['terms'] or [dict(x_from=d['x_start'],x_to=d['x_end'],lower_boundary='无外露平台',upper_boundary='无外露平台',lower_margin='0',upper_margin='0')])]))
     return result

@@ -85,7 +85,7 @@ def test_160_seeded_rectangle_windows_independent_integer_clip_and_rounding():
         check(r)
 
 
-@pytest.mark.parametrize('fault',['null','empty','extra','missing','no-evidence','blank-proof','basis','frame-proof','unconfirmed','truthy','zero-x','reverse-y','unit','non-number','manual-area','step','hole-end','same-face','full-face','different-frame','different-frame-proof'])
+@pytest.mark.parametrize('fault',['null','empty','extra','missing','no-evidence','blank-proof','basis','frame-proof','unconfirmed','truthy','zero-x','reverse-y','unit','non-number','manual-area','invalid-step','hole-end','same-face','full-face','different-frame','different-frame-proof'])
 def test_strict_window_schema_and_claims(fault):
     s=source('stepped_rectangular');b=body(s);d=b['contact_ranges'][0];c=d['plan_range']
     if fault=='null':d['plan_range']=None
@@ -103,7 +103,7 @@ def test_strict_window_schema_and_claims(fault):
     elif fault=='unit':c['unit']='m²'
     elif fault=='non-number':c['parameters']['x_start']=True
     elif fault=='manual-area':d['area']='1'
-    elif fault=='step':s=source('stepped_circular');b['source_component_hash']=store.digest(snapshot(s));d.update(face='step',level_index=1)
+    elif fault=='invalid-step':d.update(face='step',level_index=999)
     elif fault=='hole-end':d.update(face='hole_top',hole_index=1)
     elif fault=='same-face':b['contact_ranges'].append({**copy.deepcopy(d),'name':'重叠'})
     elif fault=='full-face':b['contact_ranges'].append(contact(face='bottom',name='整面重叠'))
