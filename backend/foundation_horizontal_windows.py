@@ -87,9 +87,10 @@ def checks(rows):
         if not enabled(a):continue
         for b in rows[:i]:
             if not enabled(b) or a['material_index']!=b['material_index'] or a['face']!=b['face']:continue
+            if a['face']=='step' and a['level_index']!=b['level_index']:continue
             values={};nodes={}
             for axis in ('x','y'):
                 al,ah=(Decimal(a['plan_bounds'][axis+'_'+k]) for k in ('start','end'));bl,bh=(Decimal(b['plan_bounds'][axis+'_'+k]) for k in ('start','end'))
                 values[axis+'_gap']=str(max(al,bl)-min(ah,bh));nodes[axis+'_gap']=op('subtract',(a if al>=bl else b)['formula_asts'][axis+'_start'],(a if ah<=bh else b)['formula_asts'][axis+'_end'])
-            result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],**values,state='separated' if any(Decimal(v)>0 for v in values.values()) else 'boundary_touch',formula_asts=nodes))
+            result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],**({'level_index':a['level_index']} if a['face']=='step' else {}),**values,state='separated' if any(Decimal(v)>0 for v in values.values()) else 'boundary_touch',formula_asts=nodes))
     return result

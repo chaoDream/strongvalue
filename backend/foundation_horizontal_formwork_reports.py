@@ -85,7 +85,7 @@ WINDOW_TITLES=('基础水平窗口裁切','基础水平窗口孔交集','基础�
 WINDOW_CURVED_TITLE='基础水平窗口曲线过程'
 
 
-def tables(snapshot):
+def window_tables(snapshot):
     result=end_tables(snapshot)
     ts=[t for t in snapshot['takeoffs'] if t.get('horizontal_window_checks') is not None]
     if not ts:return result
@@ -107,9 +107,36 @@ def tables(snapshot):
             [t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],c['x_gap']+' / '+c['y_gap'],('分离' if c['state']=='separated' else '共享边界')+'；X/Y均正交叠即拒绝，整面与窗口也不能并计'] for t in ts for c in t['horizontal_window_checks']] or [['—','—','无同端面窗口对；已检查整面与窗口不重复']])
     ])
     curves=[(t,d,'端层截面',d['single_gross_area'],d['window_curved_intersection']) for t,d in rows if d.get('window_curved_intersection')]
-    curves += [(t,d,'实际孔H'+str(h['hole_index']),h['single_area'],h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
+    curves += [(t,d,('上层窗口内孔H' if d['face']=='step' else '实际孔H')+str(h['hole_index']),h['covered_area'] if d['face']=='step' else h['single_area'],h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
+    curves += [(t,d,'窗口内全孔H'+str(h['hole_index']),h['window_hole_area'],h['window_hole_curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('window_hole_curved_intersection')]
     if curves:
         labels=dict(radius='圆半径',x='相对X',y='相对Y')
         result.append((WINDOW_CURVED_TITLE,['模板 / 窗口 / 对象','象限分项','参数（m）','分项有向面积（m²）','合成与精度'],[
             [t['name']+' / C'+str(d['index'])+' / '+target,q['name'],'；'.join(label+'='+q[k] for k,label in labels.items() if k in q),q['area'],m['method']+'；工作200位，保留80位，固定π见规则；交集='+covered+'m²'] for t,d,target,covered,m in curves for q in m['terms']]))
+    return result
+
+
+STEP_WINDOW_TITLES = ('基础平台窗口截面差','基础平台窗口孔裁切')
+
+
+def tables(snapshot):
+    result = window_tables(snapshot)
+    rows = [(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d['face']=='step' and 'plan_range' in d]
+    if not rows: return result
+    by_title = {t[0]:t for t in result}
+    by_title[STEP_TITLES[0]][1][3] = '单基础整下层 / 整上层 / 选入平台毛面积（m²）'
+    by_title[STEP_TITLES[1]][1][1] = '所取孔截面 / 上层共同覆盖（m²）'
+    all_holes = [(t,d,h) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d['face']=='step' for h in d['apertures']]
+    for row,(_,d,h) in zip(by_title[STEP_TITLES[1]][2],all_holes):
+        if 'plan_range' in d:
+            row[1] = h['window_hole_area']+' / '+h['covered_area']
+            row[3] = h['intersection_rule']+'；起Z<平台Z≤止Z；上层名义截面内孔底不计平台；详见平台窗口孔裁切'
+    by_title[WINDOW_TITLES[0]][1][2] = '每基础整端面或平台 / 窗口 / 实际毛交集（m²）'
+    by_title[WINDOW_TITLES[1]][1][1] = '孔全截面 / 选入面窗口内实际扣减（m²）'
+    result.extend([
+        (STEP_WINDOW_TITLES[0],['模板 / 平台 / 窗口','下层∩窗口 / 上层∩窗口（m²）','窗口内平台毛 / 实际孔扣 / 净（m²）','整个平台 / 口径'],[
+            [t['name']+' / C'+str(d['index'])+' '+d['name']+' / L'+str(d['level_index'])+'→L'+str(d['upper_level_index']),d['window_lower_area']+' / '+d['window_upper_area'],d['single_gross_area']+' / '+d['single_opening_area']+' / '+d['single_net_area'],d['full_face_area']+'；'+d['window_intersection_rule']] for t,d in rows]),
+        (STEP_WINDOW_TITLES[1],['模板 / 平台窗口 / 孔','全孔 / 孔∩窗口（m²）','孔∩上层∩窗口 / 平台窗口实际孔扣（m²）','共同交集口径'],[
+            [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index'])+' '+h['name'],h['full_area']+' / '+h['window_hole_area'],h['covered_area']+' / '+h['single_area'],h['intersection_rule']+'；体积扣孔阈值不填实物理孔'] for t,d in rows for h in d['apertures']] or [['—','0 / 0','0 / 0','平台下侧无到达本标高的孔']])
+    ])
     return result
