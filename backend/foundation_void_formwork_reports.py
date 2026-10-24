@@ -1,6 +1,7 @@
 """Stored high precision hole-wall values; no report-side recalculation."""
 TITLES=('基础孔壁模板面积汇总','基础孔壁逐面接触净量','基础孔壁无接触扣减','基础孔壁原始范围与依据','基础孔壁来源孔与原件','基础孔壁模板做法与规则')
 STRIP_TITLES=('基础孔壁横向条带','基础孔壁条带基准与原件','基础孔壁条带分离校验')
+ARC_TITLES=('基础孔壁圆弧角度','基础孔壁圆弧基准与原件','基础孔壁圆弧分离校验')
 
 
 def tables(snapshot):
@@ -14,7 +15,7 @@ def tables(snapshot):
     result.append((TITLES[3],['模板 / 范围','原始起止Z及单位','逐参数原件','接触说明及原件'],[[t['name']+' / C'+str(d['index'])+' '+d['name'],str(d['parameters']['z_start'])+' / '+str(d['parameters']['z_end'])+' '+d['unit'],'起始Z：'+d['evidence']['z_start']+'；终止Z：'+d['evidence']['z_end'],d['measurement_basis']+'；原件：'+d['evidence']['measurement_basis']] for t,d in rows]))
     def proof(t,d):
         prefix='foundation.'+str(d['material_index'])+'.holes.'+str(d['hole_index']);return '；'.join(k+'：'+str(v)+' '+d['hole_unit']+'；原件：'+t['source_evidence'][prefix+'.'+k] for k,v in d['hole_parameters'].items())+'；共同坐标原件：'+t['source_evidence']['foundation.'+str(d['material_index'])+'.holes.coordinate']
-    result.append((TITLES[4],['模板 / 范围 / 来源孔','孔位与实际尺寸及原件','孔底 / 顶Z（m）','计量边界'],[[t['name']+' / C'+str(d['index'])+' / H'+str(d['hole_index'])+' '+d['hole_name'],proof(t,d),d['hole_from_z']+' / '+d['hole_to_z'],('孔位沿来源基础局部XY；矩形孔所选横向条带，基础中心为0，不以孔中心为0；体积扣孔阈值不改变物理接触面，外边界及相邻孔仅扣条带与Z实际交集' if 'lateral_range' in d else '孔位沿来源基础局部XY；圆孔整周、矩形逐侧整宽；体积扣孔阈值不改变物理接触面，外边界及相邻孔实际贴合扣除')] for t,d in rows]))
+    result.append((TITLES[4],['模板 / 范围 / 来源孔','孔位与实际尺寸及原件','孔底 / 顶Z（m）','计量边界'],[[t['name']+' / C'+str(d['index'])+' / H'+str(d['hole_index'])+' '+d['hole_name'],proof(t,d),d['hole_from_z']+' / '+d['hole_to_z'],('以本孔自身圆心为角度原点，零角沿基础局部+X，从+Z俯视逆时针；实际孔径与所选角度计孔壁展开宽，不使用基础圆心或基础直径；体积阈值不填实物理孔' if 'arc_range' in d else '孔位沿来源基础局部XY；矩形孔所选横向条带，基础中心为0，不以孔中心为0；体积扣孔阈值不改变物理接触面，外边界及相邻孔仅扣条带与Z实际交集' if 'lateral_range' in d else '孔位沿来源基础局部XY；圆孔整周、矩形逐侧整宽；体积扣孔阈值不改变物理接触面，外边界及相邻孔实际贴合扣除')] for t,d in rows]))
     result.append((TITLES[5],['模板','材料做法、原件及计算范围'],[[t['name'],t['material']+'；原件：'+t['source_evidence']['void_formwork.material']+'；'+t['notice']+'；'+t['rule_version']+('；π='+t['void_formwork_pi_constant'] if 'void_formwork_pi_constant' in t else '；本孔壁矩形计算无需π')] for t in ts]))
     selected=[(t,d) for t,d in rows if 'lateral_range' in d]
     if selected:
@@ -22,4 +23,10 @@ def tables(snapshot):
         result.append((STRIP_TITLES[1],['模板 / 范围','原始条带起 / 止及单位','逐坐标原件','共同坐标基准及原件'],[[t['name']+' / C'+str(d['index'])+' '+d['name'],str(d['lateral_range']['parameters']['lateral_start'])+' / '+str(d['lateral_range']['parameters']['lateral_end'])+' '+d['lateral_range']['unit'],'起：'+d['lateral_range']['evidence']['lateral_start']+'；止：'+d['lateral_range']['evidence']['lateral_end'],d['lateral_range']['coordinate_basis']+'；原件：'+d['lateral_range']['coordinate_evidence_id']+'；基准核验：'+d['lateral_frame_hash']+'；原点为基础中心，正向沿局部XY，不以孔中心为0、不随观察面翻转'] for t,d in selected]))
         states={'laterally_disjoint':'横向分离','lateral_tangent':'横向边界相接','vertically_disjoint':'标高分离','vertical_tangent':'标高端面相接'}
         result.append((STRIP_TITLES[2],['模板 / 对比范围','横向间隔（m）','标高间隔（m）','分离校验'],[[t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],c['lateral_gap'],c['z_gap'],states[c['state']]+'；负间隔仅表示该方向正交叠，横向及Z均正交叠禁止，整宽也检查'] for t in ts for c in t.get('void_lateral_checks',[])] or [['—','—','—','无同孔同层同侧的条带对比项；仍执行跨记录整宽/条带重复检查']]))
+    circular=[(t,d) for t,d in rows if 'arc_range' in d]
+    if circular:
+        result.append((ARC_TITLES[0],['模板 / 范围 / 来源项层孔','实际孔心X / Y / 孔径（m）','起角 / 止角 / 弧角（°）','孔整周长 / 选弧展开宽（m）'],[[t['name']+' / C'+str(d['index'])+' '+d['name']+' / M'+str(d['material_index'])+' L'+str(d['level_index'])+' H'+str(d['hole_index'])+' '+d['hole_name'],d['arc_center_x']+' / '+d['arc_center_y']+' / '+d['arc_diameter'],d['angle_start']+' / '+d['angle_end']+' / '+d['angle_span'],d['full_circumference']+' / '+d['width']] for t,d in circular]))
+        result.append((ARC_TITLES[1],['模板 / 范围','原始起角 / 止角及单位','逐角原件','共同角度基准及原件'],[[t['name']+' / C'+str(d['index'])+' '+d['name'],str(d['arc_range']['parameters']['angle_start'])+' / '+str(d['arc_range']['parameters']['angle_end'])+' '+d['arc_range']['unit'],'起：'+d['arc_range']['evidence']['angle_start']+'；止：'+d['arc_range']['evidence']['angle_end'],d['arc_range']['coordinate_basis']+'；原件：'+d['arc_range']['coordinate_evidence_id']+'；基准核验：'+d['arc_frame_hash']+'；所选孔自身圆心为角度原点，0°沿基础+X，从+Z俯视逆时针，不自动取小弧或求余'] for t,d in circular]))
+        states={'angular_disjoint':'角度分离','angular_tangent':'角度边界相接','vertically_disjoint':'标高分离','vertical_tangent':'标高端面相接'}
+        result.append((ARC_TITLES[2],['模板 / 对比范围','周期角间隔 / 对比平移（°）','标高间隔（m）','分离校验'],[[t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],c['angle_gap']+' / '+c['periodic_shift'],c['z_gap'],states[c['state']]+'；仅比较同孔同层，角度及Z均正交叠禁止，整周也检查，0°与360°同一周期边界'] for t in ts for c in t.get('void_arc_checks',[])] or [['—','—','—','无同孔同层圆弧对比项；仍执行跨记录整周/圆弧重复校验，不同孔分别计量']]))
     return result
