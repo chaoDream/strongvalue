@@ -10,6 +10,8 @@ from .post_foundation import calculate as foundation_quantity
 from .foundation_formwork import source_component, layers, bounds
 from .railing_material import snapshot
 from .surface_takeoff import check_sources
+from . import foundation_formwork_strips as strips
+from . import foundation_void_formwork_strips as void_strips
 
 VERSION='foundation-void-formwork-1.0'
 FACES={'x_minus':'X负侧孔壁','x_plus':'X正侧孔壁','y_minus':'Y负侧孔壁','y_plus':'Y正侧孔壁','circumference':'圆孔整周内壁'}
@@ -34,27 +36,34 @@ def candidates(p,cid):
             for v in layers(d):
                 a=max(lo,Decimal(v['from_z']));b=min(hi,Decimal(v['to_z']))
                 if b>a:intersections.append(dict(level_index=v['index'],from_z=str(a),to_z=str(b)))
-            holes.append(dict(index=h['index'],name=h['name'],shape=h.get('shape','circular'),unit=h['unit'],normalized_parameters=h['normalized_parameters'],from_z=str(lo),to_z=str(hi),faces=faces(h),level_intersections=intersections))
+            limits={}
+            if h.get('shape')=='rectangular':
+                hp={k:Decimal(v) for k,v in h['normalized_parameters'].items()}
+                limits={'lateral_bounds':{f:dict(start=str(hp['y' if f.startswith('x_') else 'x']-hp['width' if f.startswith('x_') else 'length']/2),end=str(hp['y' if f.startswith('x_') else 'x']+hp['width' if f.startswith('x_') else 'length']/2),axis='Y' if f.startswith('x_') else 'X') for f in faces(h)}}
+            holes.append(dict(index=h['index'],name=h['name'],shape=h.get('shape','circular'),unit=h['unit'],normalized_parameters=h['normalized_parameters'],from_z=str(lo),to_z=str(hi),faces=faces(h),level_intersections=intersections,**limits))
         if holes:items.append(dict(material_index=d['material_index'],material_name=d['material_name'],total_count=d['total_count'],levels=[dict(index=v['index'],from_z=v['from_z'],to_z=v['to_z']) for v in layers(d)],holes=holes))
-    return dict(source_component_id=s['id'],source_component_hash=store.digest(snapshot(s)),source_name=s['name'],source_revision=s['revision'],foundation_items=items,notice=NOTICE)
+    return dict(source_component_id=s['id'],source_component_hash=store.digest(snapshot(s)),source_name=s['name'],source_revision=s['revision'],foundation_items=items,notice=void_strips.NOTICE)
 
 
-def overlap(a,b):return all(a[k]==b[k] for k in ('material_index','level_index','hole_index','face')) and max(bounds(a)[0],bounds(b)[0])<min(bounds(a)[1],bounds(b)[1])
+def overlap(a,b):return all(a[k]==b[k] for k in ('material_index','level_index','hole_index','face')) and max(bounds(a)[0],bounds(b)[0])<min(bounds(a)[1],bounds(b)[1]) and strips.overlaps(a,b)
 
 
 def check_claims(p,c):
     for other in p['components']:
-        if other['kind']=='foundation_void_formwork' and other['id']!=c.get('id') and other['source_component_id']==c['source_component_id'] and any(overlap(a,b) for a in c['contact_ranges'] for b in other['contact_ranges']):
+        if other['kind']!='foundation_void_formwork' or other['id']==c.get('id') or other['source_component_id']!=c['source_component_id']:continue
+        strips.check_frames(c['contact_ranges'],other['contact_ranges'],conflict=True)
+        if any(overlap(a,b) for a in c['contact_ranges'] for b in other['contact_ranges']):
             raise HTTPException(409,'孔壁模板范围与记录“'+other['name']+'”重复，请修订原记录或核定不重叠范围')
 
 
 def dim(item,h,k):return op('multiply',{'dimension':'foundation.'+str(item['material_index'])+'.holes.'+str(h['index'])+'.'+k},{'constant':LENGTH[h['unit']]})
 
 
-def deductions(item,tier,h,face,lo,hi,zasts,width,width_ast):
+def deductions(item,tier,h,face,lo,hi,zasts,width,width_ast,selection=None):
     if h.get('shape')!='rectangular':return [],[],Decimal(0)
     hp={k:Decimal(v) for k,v in h['normalized_parameters'].items()};tp={k:Decimal(v) for k,v in tier['normalized_parameters'].items()};axis='x' if face.startswith('x_') else 'y';other_axis='y' if axis=='x' else 'x';outer='length' if axis=='x' else 'width';perp='width' if axis=='x' else 'length';sign=Decimal(-1) if face.endswith('minus') else Decimal(1);plane=hp[axis]+sign*hp[outer]/2
     half=op('divide',dim(item,h,perp),{'constant':'2'});left=hp[other_axis]-hp[perp]/2;right=hp[other_axis]+hp[perp]/2;left_ast=op('subtract',dim(item,h,other_axis),half);right_ast=op('add',dim(item,h,other_axis),half)
+    if selection is not None:left,right,left_ast,right_ast=selection
     def row(kind,index,name,a,b,aa,bb,x,y,xa,ya):
         w=y-x;height=b-a;node=op('multiply',op('subtract',ya,xa),op('subtract',bb,aa));return dict(kind=kind,hole_index=index,name=name,lateral_start=str(x),lateral_end=str(y),z_start=str(a),z_end=str(b),width=str(w),height=str(height),single_area=str(w*height),formula_asts=dict(lateral_start=xa,lateral_end=ya,z_start=aa,z_end=bb,width=op('subtract',ya,xa),height=op('subtract',bb,aa),single_area=node))
     # An exterior face has no concrete on its outward side; do not add other cuts.
@@ -87,7 +96,7 @@ def calculate(comp,source=None):
     r=foundation_quantity(source);items={d['material_index']:d for d in r['foundation_items']};dimensions=dict(r['dimensions']);refs=dict(r['source_evidence']);conversions=[];rows=[];names=set();gross=Decimal(0);cut=Decimal(0);nodes=[]
     for k in ('basis','material','rounding'):refs['void_formwork.'+k]=text(comp.get(k+'_evidence_id'),'孔壁模板原件',200)
     for i,d in enumerate(selected,1):
-        if not isinstance(d,dict) or set(d)!={'name','material_index','level_index','hole_index','face','parameters','unit','evidence','measurement_basis'}:raise DomainError('孔壁范围须仅含名称、基础项、层、孔、内壁面、起止Z、单位及逐参数原件和说明；局部条带或圆弧另核')
+        if not isinstance(d,dict) or set(d)-{'lateral_range'}!={'name','material_index','level_index','hole_index','face','parameters','unit','evidence','measurement_basis'}:raise DomainError('孔壁范围须仅含名称、基础项、层、孔、内壁面、起止Z、单位及逐参数原件和说明；矩形局部范围可另填横向条带，圆孔圆弧另核')
         if any(type(d[k]) is not int for k in ('material_index','level_index','hole_index')) or d['material_index'] not in items:raise DomainError('孔壁基础项、层和孔须为已审来源中存在的整数序号')
         name=text(d['name'],'孔壁范围名称',200)
         if name in names:raise DomainError('孔壁范围名称不能重复')
@@ -95,21 +104,29 @@ def calculate(comp,source=None):
         if not 1<=d['level_index']<=len(tiers) or h is None:raise DomainError('所选来源层或孔不存在；不能新增未审孔洞')
         tier=tiers[d['level_index']-1]
         if not isinstance(d['face'],str) or d['face'] not in faces(h):raise DomainError('矩形孔须选X/Y正负内壁，圆孔仅支持整周竖直内壁')
+        if strips.enabled(d):
+            if h.get('shape')!='rectangular':raise DomainError('孔壁横向条带仅适用于矩形孔内壁，圆孔只支持整周')
+            strips.validate_config(d['lateral_range']);strips.check_frames([d],selected[:i-1])
         if not isinstance(d['parameters'],dict) or set(d['parameters'])!={'z_start','z_end'} or not isinstance(d['evidence'],dict) or set(d['evidence'])!={'z_start','z_end','measurement_basis'}:raise DomainError('孔壁须完整填写起止Z及逐参数原件和范围说明')
         text(d['measurement_basis'],'所选孔壁真实接触和无接触扣减说明');lo,hi=bounds(d);hl,hh,_=vertical(h);lower=max(hl,Decimal(tier['from_z']));upper=min(hh,Decimal(tier['to_z']))
         if not lower<=lo<hi<=upper:raise DomainError('孔壁起止Z须在所选层与孔的共同标高内，满足共同底≤起始Z<终止Z≤共同顶；跨层分项')
-        if any(overlap(d,v) for v in selected[:i-1]):raise DomainError('同基础项同层同孔同内壁面的标高范围正高度重叠，不能重复计量')
+        if any(overlap(d,v) for v in selected[:i-1]):raise DomainError('同基础项同层同孔同内壁面的横向与标高范围均正重叠，不能重复计量')
         key='void_formwork.'+str(i);asts={}
         for k,value in zip(('z_start','z_end'),(lo,hi)):
             dimensions[key+'.'+k]=str(d['parameters'][k]);asts[k]=op('multiply',{'dimension':key+'.'+k},{'constant':LENGTH[d['unit']]});conversions.append(dict(parameter=key+'.'+k,original_value=str(d['parameters'][k]),source_unit=d['unit'],factor=LENGTH[d['unit']],canonical_value=str(value),canonical_unit='m',rule_version=UNIT_VERSION))
         refs.update({key+'.'+k:text(v,'孔壁接触原件',200) for k,v in d['evidence'].items()})
-        hp={k:Decimal(v) for k,v in h['normalized_parameters'].items()};circular=h.get('shape')!='rectangular';size='diameter' if circular else 'width' if d['face'].startswith('x_') else 'length';width=hp[size]*(Decimal(PI) if circular else 1);width_ast=op('multiply',dim(item,h,size),*([{'constant':PI}] if circular else []));height=hi-lo;height_ast=op('subtract',asts['z_end'],asts['z_start']);single_gross=width*height;gross_ast=op('multiply',width_ast,height_ast)
-        ds,ns,single_cut=deductions(item,tier,h,d['face'],lo,hi,asts,width,width_ast);single_net=single_gross-single_cut
+        hp={k:Decimal(v) for k,v in h['normalized_parameters'].items()};circular=h.get('shape')!='rectangular';size='diameter' if circular else 'width' if d['face'].startswith('x_') else 'length';width=hp[size]*(Decimal(PI) if circular else 1);width_ast=op('multiply',dim(item,h,size),*([{'constant':PI}] if circular else []));extra={};extra_asts={};selection=None
+        if strips.enabled(d):
+            width,width_ast,extra,extra_asts=void_strips.apply(d,item,h,key,dimensions,refs,conversions,width,width_ast,dim)
+            selection=(Decimal(extra['lateral_start']),Decimal(extra['lateral_end']),extra_asts['lateral_start'],extra_asts['lateral_end'])
+        height=hi-lo;height_ast=op('subtract',asts['z_end'],asts['z_start']);single_gross=width*height;gross_ast=op('multiply',width_ast,height_ast)
+        ds,ns,single_cut=deductions(item,tier,h,d['face'],lo,hi,asts,width,width_ast,selection);single_net=single_gross-single_cut
         if single_net<0:raise DomainError('孔壁无接触扣减超过毛面积，请核对已审几何')
         count=Decimal(item['total_count']);count_ast=item['formula_asts']['total_count'];cut_ast=op('add',*ns);net_ast=op('subtract',gross_ast,cut_ast);total_ast=op('multiply',net_ast,count_ast);gross+=single_gross*count;cut+=single_cut*count;nodes.append(total_ast)
-        rows.append({**d,'index':i,'material_name':item['material_name'],'hole_name':h['name'],'hole_shape':h.get('shape','circular'),'hole_unit':h['unit'],'hole_parameters':h['parameters'],'hole_normalized_parameters':h['normalized_parameters'],'hole_from_z':str(hl),'hole_to_z':str(hh),'layer_from_z':tier['from_z'],'layer_to_z':tier['to_z'],'available_from_z':str(lower),'available_to_z':str(upper),'face_label':FACES[d['face']],'normalized_parameters':dict(z_start=str(lo),z_end=str(hi)),'width':str(width),'height':str(height),'total_count':str(count),'single_gross_area':str(single_gross),'single_deduction_area':str(single_cut),'single_net_area':str(single_net),'total_gross_area':str(single_gross*count),'total_deduction_area':str(single_cut*count),'total_net_area':str(single_net*count),'deductions':ds,'formula_asts':dict(z_start=asts['z_start'],z_end=asts['z_end'],width=width_ast,height=height_ast,total_count=count_ast,single_gross_area=gross_ast,single_deduction_area=cut_ast,single_net_area=net_ast,total_gross_area=op('multiply',gross_ast,count_ast),total_deduction_area=op('multiply',cut_ast,count_ast),total_net_area=total_ast)})
+        rows.append({**d,**extra,'index':i,'material_name':item['material_name'],'hole_name':h['name'],'hole_shape':h.get('shape','circular'),'hole_unit':h['unit'],'hole_parameters':h['parameters'],'hole_normalized_parameters':h['normalized_parameters'],'hole_from_z':str(hl),'hole_to_z':str(hh),'layer_from_z':tier['from_z'],'layer_to_z':tier['to_z'],'available_from_z':str(lower),'available_to_z':str(upper),'face_label':FACES[d['face']],'normalized_parameters':dict(z_start=str(lo),z_end=str(hi)),'width':str(width),'height':str(height),'total_count':str(count),'single_gross_area':str(single_gross),'single_deduction_area':str(single_cut),'single_net_area':str(single_net),'total_gross_area':str(single_gross*count),'total_deduction_area':str(single_cut*count),'total_net_area':str(single_net*count),'deductions':ds,'formula_asts':dict(**extra_asts,z_start=asts['z_start'],z_end=asts['z_end'],width=width_ast,height=height_ast,total_count=count_ast,single_gross_area=gross_ast,single_deduction_area=cut_ast,single_net_area=net_ast,total_gross_area=op('multiply',gross_ast,count_ast),total_deduction_area=op('multiply',cut_ast,count_ast),total_net_area=total_ast)})
     quantity_number(gross);quantity_number(cut);net=quantity_number(gross-cut);q=quantity_number(net.quantize(Decimal(1).scaleb(-digits),rounding=ROUND_HALF_UP))
-    return dict(quantity=str(q),gross=str(gross),deduction=str(cut),unit='m²',parameters={},material=comp['material'],formula='Σ[(已选孔壁整宽或整周长×实际接触高−外边界及相邻孔实际无接触交集)×已审全部基础个数]；仅总净面积修约'+str(digits)+'位',formula_ast=dict(op='round',args=[op('add',*nodes)],digits=digits,mode='HALF_UP'),dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,source_unit_conversions=r['unit_conversions'],source_geometry=snapshot(source),source_component_id=source['id'],source_component_hash=comp['source_component_hash'],contact_ranges=rows,void_formwork_summary=dict(source_name=source['name'],source_revision=source['revision'],range_count=len(rows),unrounded_quantity=str(net),rounding_digits=digits,rounding_adjustment=str(q-net)),**({'void_formwork_pi_constant':PI} if any(d['face']=='circumference' for d in selected) else {}),rounding_rule='Decimal 80位及记录的固定π，来源未修约孔尺寸与最终全部基础个数；逐面与扣减不修约，不再乘来源重复，仅总面积HALF_UP修约',rule_version=VERSION,notice=NOTICE)
+    has_strips=any(strips.enabled(d) for d in selected)
+    return dict(quantity=str(q),gross=str(gross),deduction=str(cut),unit='m²',parameters={},material=comp['material'],formula=('Σ[(已选孔壁整宽/条带宽或圆孔整周长×实际接触高−外边界及相邻孔实际无接触交集)×已审全部基础个数]；仅总净面积修约' if has_strips else 'Σ[(已选孔壁整宽或整周长×实际接触高−外边界及相邻孔实际无接触交集)×已审全部基础个数]；仅总净面积修约')+str(digits)+'位',formula_ast=dict(op='round',args=[op('add',*nodes)],digits=digits,mode='HALF_UP'),dimensions=dimensions,source_evidence=refs,unit_conversions=conversions,source_unit_conversions=r['unit_conversions'],source_geometry=snapshot(source),source_component_id=source['id'],source_component_hash=comp['source_component_hash'],contact_ranges=rows,void_formwork_summary=dict(source_name=source['name'],source_revision=source['revision'],range_count=len(rows),unrounded_quantity=str(net),rounding_digits=digits,rounding_adjustment=str(q-net)),**({'void_formwork_pi_constant':PI} if any(d['face']=='circumference' for d in selected) else {}),rounding_rule='Decimal 80位及记录的固定π，来源未修约孔尺寸与最终全部基础个数；逐面与扣减不修约，不再乘来源重复，仅总面积HALF_UP修约',rule_version=void_strips.VERSION if has_strips else VERSION,notice=void_strips.NOTICE if has_strips else NOTICE,**({'void_lateral_checks':void_strips.checks(rows,items,dim)} if has_strips else {}))
 
 
 def validate(p,comp,saved=False):
