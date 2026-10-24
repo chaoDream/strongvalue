@@ -24,7 +24,7 @@ STEP_TITLES = ('基础台阶平台截面差','基础台阶平台孔交集')
 CURVED_TITLE = '基础平台曲线交集过程'
 
 
-def tables(snapshot):
+def step_tables(snapshot):
     result = legacy_tables(snapshot)
     rows = [(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d['face']=='step']
     if not rows: return result
@@ -46,4 +46,36 @@ def tables(snapshot):
         labels = dict(radius='圆半径',chord_distance='有向弦距',half_chord='半弦长',minor_half_angle='小弓形半角',x='相对X',y='相对Y')
         result.append((CURVED_TITLE,['模板 / 平台 / 孔','解析分项','参数（长度m / 角rad）','分项有向面积（m²）','合成口径及计算精度'],[
             [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index']),q['name'],'；'.join(label+'='+q[k] for k,label in labels.items() if k in q),q['area'],h['curved_intersection']['method']+'；工作'+str(h['curved_intersection']['working_digits'])+'位，保留'+str(h['curved_intersection']['output_digits'])+'位；固定π见模板规则；弦距负取大弓形；象限分项按右上−左上−右下＋左下组合；交集='+h['covered_area']+'m²'] for t,d,h in curves for q in h['curved_intersection']['terms']]))
+    return result
+
+
+END_TITLES = ('基础孔端接触截面','基础孔端相接孔交集')
+END_CURVED_TITLE = '基础孔端曲线交集过程'
+
+
+def tables(snapshot):
+    result = step_tables(snapshot)
+    rows = [(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d['face'] in ('hole_bottom','hole_top')]
+    if not rows: return result
+    result[0][1][1] = '选入水平整面数'
+    result[1][1][1:3] = ['接触水平面 / Z（m）','混凝土侧层真实尺寸（m）']
+    result[2][1][3:5] = ['每基础本面孔交集（m²）','本面扣减口径与孔原件']
+    apertures = [(t,d,h) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] for h in d['apertures']]
+    for row,(t,d,h) in zip(result[2][2],apertures):
+        if d['face'] in ('hole_bottom','hole_top'):
+            row[4] = '扣混凝土侧相接孔与所选孔交集，详见孔端相接孔交集；'+ '；'.join(k+'：'+v for k,v in t['source_evidence'].items() if k.startswith('foundation.'+str(d['material_index'])+'.holes.'+str(h['hole_index'])+'.'))
+    result.extend([
+        (END_TITLES[0], ['模板 / 范围 / 孔','孔端 / Z / 混凝土侧层','所选孔原始尺寸及标高','每基础全孔 / 与侧层交集 / 相接孔扣 / 净（m²）','裁切口径及孔原件'],
+         [[t['name']+' / C'+str(d['index'])+' '+d['name']+' / H'+str(d['hole_index'])+' '+d['hole_name'],d['face_label']+' / Z='+d['z']+'m / '+('下侧' if d['concrete_side']=='below' else '上侧')+'L'+str(d['level_index']),
+           '；'.join(k+'='+str(v) for k,v in d['hole_parameters'].items())+' '+d['hole_unit']+'；孔Z='+d['hole_from_z']+'至'+d['hole_to_z']+'m',
+           d['single_full_hole_area']+' / '+d['single_gross_area']+' / '+d['single_opening_area']+' / '+d['single_net_area'],d['hole_end_intersection_rule']+'；毛面积仅取所选孔与混凝土侧层交集；'+ '；'.join(k+'：'+v for k,v in t['source_evidence'].items() if k.startswith('foundation.'+str(d['material_index'])+'.holes.'+str(d['hole_index'])+'.'))] for t,d in rows]),
+        (END_TITLES[1], ['模板 / 孔端 / 相接孔','相接孔原始尺寸及Z','每基础相接孔全截面 / 实际交集（m²）','交集及混凝土侧规则'],
+         [[t['name']+' / C'+str(d['index'])+' H'+str(d['hole_index'])+' / H'+str(h['hole_index'])+' '+h['name'],'；'.join(k+'='+str(v) for k,v in h['parameters'].items())+' '+h['unit']+'；Z='+h['from_z']+'至'+h['to_z']+'m',h['full_area']+' / '+h['single_area'],h['intersection_rule']+'；'+('相接孔起Z<孔底Z≤相接孔止Z' if d['face']=='hole_bottom' else '相接孔起Z≤孔顶Z<相接孔止Z')+'；扣与所选孔交集，不扣整层或整相接孔'] for t,d in rows for h in d['apertures']] or [['—','—','0 / 0','所选孔端混凝土侧无其他孔，不另扣减']])
+    ])
+    curves = [(t,d,'混凝土侧层裁切',d['single_gross_area'],d['hole_end_curved_intersection']) for t,d in rows if d.get('hole_end_curved_intersection')]
+    curves += [(t,d,'相接孔H'+str(h['hole_index']),h['single_area'],h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
+    if curves:
+        labels = dict(radius='圆半径',chord_distance='有向弦距',half_chord='半弦长',minor_half_angle='小弓形半角',x='相对X',y='相对Y')
+        result.append((END_CURVED_TITLE,['模板 / 孔端 / 裁切对象','解析分项','参数（长度m / 角rad）','分项有向面积（m²）','合成及精度'],[
+            [t['name']+' / C'+str(d['index'])+' H'+str(d['hole_index'])+' / '+target,q['name'],'；'.join(label+'='+q[k] for k,label in labels.items() if k in q),q['area'],m['method']+'；工作'+str(m['working_digits'])+'位，保留'+str(m['output_digits'])+'位；固定π见模板规则；交集='+covered+'m²'] for t,d,target,covered,m in curves for q in m['terms']]))
     return result

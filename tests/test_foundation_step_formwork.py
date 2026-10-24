@@ -161,7 +161,7 @@ def setup(clients,pid=None,shape='stepped_rectangular',unsupported=False):
 
 
 def test_candidate_and_preview_readonly_unsupported_does_not_hide_end_faces(clients):
-    e,r,pid,s,b,eid=setup(clients,unsupported=True);before=get(e,pid);res=e.get(f'/api/v1/projects/{pid}/foundation-horizontal-formwork-candidates',params=dict(component_id=s['id']));assert res.status_code==200,res.text;faces=res.json()['foundation_items'][0]['faces'];assert [f['face'] for f in faces]==['top','bottom','step'];assert faces[-1]['available'] is True and faces[-1]['apertures'][0]['curved_intersection'];post(e,pid,b,'/components/preview');post(e,pid,end_body(s,eid),'/components/preview');assert get(e,pid)==before
+    e,r,pid,s,b,eid=setup(clients,unsupported=True);before=get(e,pid);res=e.get(f'/api/v1/projects/{pid}/foundation-horizontal-formwork-candidates',params=dict(component_id=s['id']));assert res.status_code==200,res.text;faces=[f for f in res.json()['foundation_items'][0]['faces'] if f['face'] in ('top','bottom','step')];assert [f['face'] for f in faces]==['top','bottom','step'];assert faces[-1]['available'] is True and faces[-1]['apertures'][0]['curved_intersection'];post(e,pid,b,'/components/preview');post(e,pid,end_body(s,eid),'/components/preview');assert get(e,pid)==before
 
 
 def test_duplicate_actual_id_history_distinct_level_and_source_stale(clients):

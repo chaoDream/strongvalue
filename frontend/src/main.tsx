@@ -20,7 +20,7 @@ import OCRPanel from './OCRPanel';
 import ReportPreviewPanel from './ReportPreviewPanel';
 import {validBox,regionSpace} from './evidenceRegion';
 const DrawingRegisterPanel=React.lazy(()=>import('./DrawingRegisterPanel'));
-const componentEditors:Record<string,string>={foundation_horizontal_formwork:'顶底编辑见上方',foundation_void_formwork:'孔壁编辑见上方',foundation_formwork:'模板编辑见上方',post_foundation:'基础编辑见上方',railing_material:'材料表编辑见上方',polygon_railing:'栏杆编辑见上方',polygon_region:'多边形编辑见上方',chamber_plate:'井板编辑见上方',circular_chamber:'井筒编辑见上方',route_bedding:'垫层编辑见上方',pipe_envelope:'外包编辑见上方',volume_balance:'回填编辑见上方',station_trench:'沟槽编辑见上方',design_route:'管线编辑见上方',surface_faces:'逐面编辑见上方',spatial_regions:'空间编辑见上方',planar_regions:'区域编辑见上方',compound:'分项编辑见上方'};
+const componentEditors:Record<string,string>={foundation_horizontal_formwork:'水平模板编辑见上方',foundation_void_formwork:'孔壁编辑见上方',foundation_formwork:'模板编辑见上方',post_foundation:'基础编辑见上方',railing_material:'材料表编辑见上方',polygon_railing:'栏杆编辑见上方',polygon_region:'多边形编辑见上方',chamber_plate:'井板编辑见上方',circular_chamber:'井筒编辑见上方',route_bedding:'垫层编辑见上方',pipe_envelope:'外包编辑见上方',volume_balance:'回填编辑见上方',station_trench:'沟槽编辑见上方',design_route:'管线编辑见上方',surface_faces:'逐面编辑见上方',spatial_regions:'空间编辑见上方',planar_regions:'区域编辑见上方',compound:'分项编辑见上方'};
 const PlateDetails=React.lazy(()=>import('./ChamberPlatePanel').then(m=>({default:m.PlateDetails})));
 const ChamberDetails=React.lazy(()=>import('./ChamberTakeoffPanel').then(m=>({default:m.ChamberDetails})));
 const BeddingDetails=React.lazy(()=>import('./BeddingTakeoffPanel').then(m=>({default:m.BeddingDetails})));

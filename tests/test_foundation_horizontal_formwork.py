@@ -142,7 +142,7 @@ def test_strict_inputs(fault):
 
 def test_candidates_preview_no_mutation_and_actual_ids(clients):
     e,r,pid,s,b,eid=setup(clients);before=get(e,pid);res=e.get(f'/api/v1/projects/{pid}/foundation-horizontal-formwork-candidates',params=dict(component_id=s['id']));assert res.status_code==200,res.text
-    f=res.json()['foundation_items'][0];assert [x['face'] for x in f['faces']]==['top','bottom'] and f['faces'][1]['single_opening_area']=='0.006'
+    f=res.json()['foundation_items'][0];assert [x['face'] for x in f['faces'] if x['face'] in ('top','bottom','step')]==['top','bottom'] and f['faces'][1]['single_opening_area']=='0.006'
     assert post(e,pid,b,'/components/preview').json()['quantity']=='8.668' and get(e,pid)==before
     b['contact_ranges']=[contact(eid)];c=post(e,pid,b).json();approve(r,pid,'components',c);post(e,pid,{**b,'id':c['id']},expected=409)
     b['contact_ranges']=[contact(eid,'bottom')];post(e,pid,b);b['contact_ranges']=[contact(eid)];post(e,pid,b,expected=409)
