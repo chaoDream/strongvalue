@@ -59,7 +59,7 @@ def candidates(p, cid):
             faces.append(face)
         items.append(dict(material_index=item['material_index'], material_name=item['material_name'], total_count=item['total_count'], faces=faces))
     return dict(source_component_id=s['id'], source_component_hash=store.digest(snapshot(s)), source_name=s['name'],
-                source_revision=s['revision'], foundation_items=items, notice=steps.NOTICE if any(len(d['faces'])>2 for d in items) else NOTICE)
+                source_revision=s['revision'], foundation_items=items, notice=steps.CURVED_NOTICE if any(h.get('curved_intersection') for d in items for f in d['faces'] for h in f.get('apertures',[])) else steps.NOTICE if any(len(d['faces'])>2 for d in items) else NOTICE)
 
 
 def claim_key(d):
@@ -125,6 +125,7 @@ def calculate(comp, source=None):
     quantity_number(gross); quantity_number(cut); net = quantity_number(gross-cut); q = quantity_number(net.quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP))
     has_pi = any('diameter' in d['normalized_parameters'] or any(h['shape']=='circular' for h in d['apertures']) for d in rows)
     has_step = any(d['face']=='step' for d in rows)
+    has_curve = any(h.get('curved_intersection') for d in rows for h in d['apertures'])
     return dict(quantity=str(q), gross=str(gross), deduction=str(cut), unit='m²', parameters={}, material=comp['material'],
                 formula=('Σ[(已选水平面毛面积−该面实际孔交集)×已审全部基础个数]；平台毛面积=下层截面−上层完整截面；仅总净面积HALF_UP修约' if has_step else 'Σ[(已选整体顶面或底面真实截面−贯通该端面的实际孔截面)×已审全部基础个数]；仅总净面积HALF_UP修约')+str(digits)+'位',
                 formula_ast=dict(op='round',args=[op('add',*nodes)],digits=digits,mode='HALF_UP'), dimensions=dimensions, source_evidence=refs,
@@ -132,7 +133,7 @@ def calculate(comp, source=None):
                 source_component_hash=comp['source_component_hash'], contact_ranges=rows,
                 horizontal_formwork_summary=dict(source_name=source['name'],source_revision=source['revision'],range_count=len(rows),unrounded_quantity=str(net),rounding_digits=digits,rounding_adjustment=str(q-net)),
                 **({'horizontal_formwork_pi_constant':PI} if has_pi else {}),
-                rounding_rule='Decimal 80位及记录的固定π，沿用来源未修约尺寸和全部最终基础个数；逐面逐孔不修约，仅总净面积HALF_UP修约',rule_version='foundation-horizontal-formwork-1.1' if has_step else VERSION,notice=steps.NOTICE if has_step else NOTICE)
+                rounding_rule='Decimal 80位及记录的固定π，沿用来源未修约尺寸和全部最终基础个数；逐面逐孔不修约，仅总净面积HALF_UP修约',rule_version='foundation-horizontal-formwork-1.2' if has_curve else 'foundation-horizontal-formwork-1.1' if has_step else VERSION,notice=steps.CURVED_NOTICE if has_curve else steps.NOTICE if has_step else NOTICE)
 
 
 def validate(p, comp, saved=False):

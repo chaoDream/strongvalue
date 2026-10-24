@@ -4,7 +4,7 @@ import io
 import json
 import math
 import random
-from decimal import Decimal, ROUND_HALF_UP, localcontext
+from decimal import Decimal, ROUND_HALF_UP, ROUND_HALF_EVEN, localcontext
 import pytest
 from openpyxl import load_workbook
 from pypdf import PdfReader
@@ -33,11 +33,17 @@ def setup(clients):
 
 
 def evaluate(node, dimensions):
+    if node.get('op')=='decimal_precision':
+        with localcontext() as ctx:
+            ctx.prec=node['working_digits']; ctx.rounding=ROUND_HALF_EVEN; value=evaluate(node['args'][0],dimensions);ctx.prec=node['output_digits'];return +value
     if 'dimension' in node:return Decimal(dimensions[node['dimension']])
     if 'constant' in node:return Decimal(node['constant'])
     values=[evaluate(a,dimensions) for a in node['args']]
     if node['op']=='divide':return values[0]/values[1]
     if node['op']=='sqrt':return values[0].sqrt()
+    if node['op']=='atan2':
+        from backend.curved_intersections import atan2
+        return atan2(*values)
     if node['op']=='round':return values[0].quantize(Decimal(1).scaleb(-node['digits']),rounding=ROUND_HALF_UP)
     if node['op']=='add':return sum(values,Decimal(0))
     if node['op']=='subtract':return values[0]-values[1]

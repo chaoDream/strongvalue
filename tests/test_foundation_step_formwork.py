@@ -1,4 +1,4 @@
-"""Synthetic exposed ledges, exact clipping and intentionally blocked curved lenses."""
+"""Synthetic exposed ledges, exact clipping and upgraded curved-lens coverage."""
 import copy, io, random
 from decimal import Decimal, localcontext, ROUND_HALF_UP
 import pytest
@@ -105,9 +105,9 @@ def test_exact_circle_rect_containment_disjoint_and_tangent(shape,kind,x,y,a,b,b
     ('stepped_rectangular','circle','190','0','40',None,None),
     ('stepped_rectangular','circle','190','140','40',None,None),
 ])
-def test_partial_curved_boundary_blocked_but_unselected_end_faces_work(shape,kind,x,y,d,l,w):
+def test_partial_curved_boundary_supported_and_unselected_end_faces_unchanged(shape,kind,x,y,d,l,w):
     h=hole(x=x,y=y,diameter=d) if kind=='circle' else rectangle(x=x,y=y,length=l,width=w);s=source(shape,holes=[{**h,'vertical_range':interval('0','200')}]);b=body(s)
-    with pytest.raises(DomainError,match='曲线边界局部相交'):calculate(b,s)
+    r=calculate(b,s);check(r);assert r['rule_version']=='foundation-horizontal-formwork-1.2' and r['contact_ranges'][0]['apertures'][0]['curved_intersection']
     assert calculate(end_body(s),s)['rule_version']=='foundation-horizontal-formwork-1.0'
 
 
@@ -161,7 +161,7 @@ def setup(clients,pid=None,shape='stepped_rectangular',unsupported=False):
 
 
 def test_candidate_and_preview_readonly_unsupported_does_not_hide_end_faces(clients):
-    e,r,pid,s,b,eid=setup(clients,unsupported=True);before=get(e,pid);res=e.get(f'/api/v1/projects/{pid}/foundation-horizontal-formwork-candidates',params=dict(component_id=s['id']));assert res.status_code==200,res.text;faces=res.json()['foundation_items'][0]['faces'];assert [f['face'] for f in faces]==['top','bottom','step'];assert faces[-1]['available'] is False and '曲线' in faces[-1]['reason'];post(e,pid,b,'/components/preview',422);post(e,pid,end_body(s,eid),'/components/preview');assert get(e,pid)==before
+    e,r,pid,s,b,eid=setup(clients,unsupported=True);before=get(e,pid);res=e.get(f'/api/v1/projects/{pid}/foundation-horizontal-formwork-candidates',params=dict(component_id=s['id']));assert res.status_code==200,res.text;faces=res.json()['foundation_items'][0]['faces'];assert [f['face'] for f in faces]==['top','bottom','step'];assert faces[-1]['available'] is True and faces[-1]['apertures'][0]['curved_intersection'];post(e,pid,b,'/components/preview');post(e,pid,end_body(s,eid),'/components/preview');assert get(e,pid)==before
 
 
 def test_duplicate_actual_id_history_distinct_level_and_source_stale(clients):

@@ -249,9 +249,9 @@ function App() {
     if (!user)
         return <div className="login-page"><div className="login-art"><div className="brand"><div className="brand-logo">强</div><b>强·报价</b><span>QIANGQUOTE</span></div><div><span className="eyebrow">ENGINEERING INTELLIGENCE</span><h1>从一张图纸，<br />到一份有依据的报价。</h1><p>工程证据 · 确定性计价 · 专业复核</p><div className="login-lines"/></div><small>原始资料 → 构件算量 → 清单组价 → 成果交付</small></div><form className="login-form" onSubmit={async (e) => { e.preventDefault(); const f = new FormData(e.currentTarget); setBusy(true); try {
             const u = await api('/auth/login', 'POST', Object.fromEntries(f));
-            setUser(u);
             setError('');
             await refresh();
+            setUser(u);
         }
         catch (e: any) {
             setError(e.message);

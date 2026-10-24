@@ -21,6 +21,7 @@ def legacy_tables(snapshot):
 
 
 STEP_TITLES = ('基础台阶平台截面差','基础台阶平台孔交集')
+CURVED_TITLE = '基础平台曲线交集过程'
 
 
 def tables(snapshot):
@@ -40,4 +41,9 @@ def tables(snapshot):
         (STEP_TITLES[1], ['模板 / 平台 / 孔','全孔 / 上层覆盖交集（m²）','单基础平台内实际孔扣减（m²）','精确交集口径'],
          [[t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index'])+' '+h['name'],h['full_area']+' / '+h['covered_area'],h['single_area'],h['intersection_rule']+'；全孔减上层覆盖交集；起Z<平台Z≤止Z；上层名义截面内孔底不计入平台'] for t,d in rows for h in d['apertures']] or [['—','0 / 0','0','所选平台下侧无到达本标高的孔；不扣未到达的盲孔或从平台起孔']])
     ])
+    curves = [(t,d,h) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
+    if curves:
+        labels = dict(radius='圆半径',chord_distance='有向弦距',half_chord='半弦长',minor_half_angle='小弓形半角',x='相对X',y='相对Y')
+        result.append((CURVED_TITLE,['模板 / 平台 / 孔','解析分项','参数（长度m / 角rad）','分项有向面积（m²）','合成口径及计算精度'],[
+            [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index']),q['name'],'；'.join(label+'='+q[k] for k,label in labels.items() if k in q),q['area'],h['curved_intersection']['method']+'；工作'+str(h['curved_intersection']['working_digits'])+'位，保留'+str(h['curved_intersection']['output_digits'])+'位；固定π见模板规则；弦距负取大弓形；象限分项按右上−左上−右下＋左下组合；交集='+h['covered_area']+'m²'] for t,d,h in curves for q in h['curved_intersection']['terms']]))
     return result
