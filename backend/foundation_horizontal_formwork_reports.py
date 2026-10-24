@@ -53,7 +53,7 @@ END_TITLES = ('基础孔端接触截面','基础孔端相接孔交集')
 END_CURVED_TITLE = '基础孔端曲线交集过程'
 
 
-def tables(snapshot):
+def end_tables(snapshot):
     result = step_tables(snapshot)
     rows = [(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d['face'] in ('hole_bottom','hole_top')]
     if not rows: return result
@@ -78,4 +78,38 @@ def tables(snapshot):
         labels = dict(radius='圆半径',chord_distance='有向弦距',half_chord='半弦长',minor_half_angle='小弓形半角',x='相对X',y='相对Y')
         result.append((END_CURVED_TITLE,['模板 / 孔端 / 裁切对象','解析分项','参数（长度m / 角rad）','分项有向面积（m²）','合成及精度'],[
             [t['name']+' / C'+str(d['index'])+' H'+str(d['hole_index'])+' / '+target,q['name'],'；'.join(label+'='+q[k] for k,label in labels.items() if k in q),q['area'],m['method']+'；工作'+str(m['working_digits'])+'位，保留'+str(m['output_digits'])+'位；固定π见模板规则；交集='+covered+'m²'] for t,d,target,covered,m in curves for q in m['terms']]))
+    return result
+
+
+WINDOW_TITLES=('基础水平窗口裁切','基础水平窗口孔交集','基础水平窗口坐标原件','基础水平窗口分离校验')
+WINDOW_CURVED_TITLE='基础水平窗口曲线过程'
+
+
+def tables(snapshot):
+    result=end_tables(snapshot)
+    ts=[t for t in snapshot['takeoffs'] if t.get('horizontal_window_checks') is not None]
+    if not ts:return result
+    rows=[(t,d) for t in ts for d in t['contact_ranges'] if 'plan_range' in d]
+    result[0][1][1]='选入整面或窗口数'
+    result[1][1][1]='水平面 / Z（m）'
+    # These are the original, unsplit stored rows; use face identity, never names.
+    all_holes=[(t,d,h) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] for h in d['apertures']]
+    for row,(t,d,h) in zip(result[2][2],all_holes):
+        if 'plan_range' in d:row[4]='仅扣到达本端面且与XY窗口相交的实际孔截面；详见窗口孔交集；体积阈值不填实物理孔'
+    result.extend([
+        (WINDOW_TITLES[0],['模板 / 范围 / 端面','XY窗口范围（m）','每基础全端面 / 窗口 / 实际毛交集（m²）','每基础孔扣 / 净（m²）','实际裁切口径'],[
+            [t['name']+' / C'+str(d['index'])+' '+d['name']+' / '+d['face_label'],'X '+d['x_start']+'至'+d['x_end']+'；Y '+d['y_start']+'至'+d['y_end'],d['full_face_area']+' / '+d['window_area']+' / '+d['single_gross_area'],d['single_opening_area']+' / '+d['single_net_area'],d['window_intersection_rule']+'；只取窗口与真实端层交集，孔仅按窗口内部分扣减'] for t,d in rows]),
+        (WINDOW_TITLES[1],['模板 / 窗口 / 孔','孔全截面 / 与窗口交集（m²）','交集口径'],[
+            [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index'])+' '+h['name'],h['full_area']+' / '+h['single_area'],h['intersection_rule']+'；按该端面起止Z条件取孔，再与窗口裁切'] for t,d in rows for h in d['apertures']] or [['—','0 / 0','所选端面无到达本标高的孔']]),
+        (WINDOW_TITLES[2],['模板 / 窗口','原始坐标及单位','逐坐标原件','共用基础XY基准及原件'],[
+            [t['name']+' / C'+str(d['index'])+' '+d['name'],'；'.join(k+'='+str(v) for k,v in d['plan_range']['parameters'].items())+' '+d['plan_range']['unit'],'；'.join(k+'：'+v for k,v in d['plan_range']['evidence'].items()),d['plan_range']['coordinate_basis']+'；原件：'+d['plan_range']['coordinate_evidence_id']+'；校验：'+d['plan_frame_hash']] for t,d in rows]),
+        (WINDOW_TITLES[3],['模板 / 两窗口','X / Y有向间隔（m）','状态及重复检查口径'],[
+            [t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],c['x_gap']+' / '+c['y_gap'],('分离' if c['state']=='separated' else '共享边界')+'；X/Y均正交叠即拒绝，整面与窗口也不能并计'] for t in ts for c in t['horizontal_window_checks']] or [['—','—','无同端面窗口对；已检查整面与窗口不重复']])
+    ])
+    curves=[(t,d,'端层截面',d['single_gross_area'],d['window_curved_intersection']) for t,d in rows if d.get('window_curved_intersection')]
+    curves += [(t,d,'实际孔H'+str(h['hole_index']),h['single_area'],h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
+    if curves:
+        labels=dict(radius='圆半径',x='相对X',y='相对Y')
+        result.append((WINDOW_CURVED_TITLE,['模板 / 窗口 / 对象','象限分项','参数（m）','分项有向面积（m²）','合成与精度'],[
+            [t['name']+' / C'+str(d['index'])+' / '+target,q['name'],'；'.join(label+'='+q[k] for k,label in labels.items() if k in q),q['area'],m['method']+'；工作200位，保留80位，固定π见规则；交集='+covered+'m²'] for t,d,target,covered,m in curves for q in m['terms']]))
     return result

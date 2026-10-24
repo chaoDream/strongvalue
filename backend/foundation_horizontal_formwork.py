@@ -13,6 +13,7 @@ from .railing_material import snapshot
 from .surface_takeoff import check_sources
 from . import foundation_step_formwork as steps
 from . import foundation_hole_end_formwork as ends
+from . import foundation_horizontal_windows as windows
 
 VERSION = 'foundation-horizontal-formwork-1.0'
 FACES = {'top': '整体最顶面', 'bottom': '整体最底面', 'step':'台阶中间整个平台', **ends.FACES}
@@ -78,7 +79,8 @@ def claim_key(d):
 def check_claims(p, comp):
     for other in p['components']:
         if other['kind'] != 'foundation_horizontal_formwork' or other['id'] == comp.get('id') or other['source_component_id'] != comp['source_component_id']: continue
-        if any(claim_key(a) == claim_key(b) for a in comp['contact_ranges'] for b in other['contact_ranges']):
+        windows.check_frames(comp['contact_ranges'],other['contact_ranges'],conflict=True)
+        if any(claim_key(a) == claim_key(b) and windows.overlaps(a,b) for a in comp['contact_ranges'] for b in other['contact_ranges']):
             raise HTTPException(409, '水平模板整端面与记录“'+other['name']+'”重复，请修订原记录或选不同端面')
 
 
@@ -97,10 +99,10 @@ def calculate(comp, source=None):
     selected = comp.get('contact_ranges')
     if not isinstance(selected, list) or not 1 <= len(selected) <= 200: raise DomainError('须选择1至200项基础水平整面，未选面不计')
     r = foundation_quantity(source); items = {d['material_index']:d for d in r['foundation_items']}
-    dimensions = dict(r['dimensions']); refs = dict(r['source_evidence']); rows = []; names = set(); claims = set(); nodes = []; gross = Decimal(0); cut = Decimal(0)
+    dimensions = dict(r['dimensions']); refs = dict(r['source_evidence']); rows = []; conversions = []; names = set(); claims = set(); nodes = []; gross = Decimal(0); cut = Decimal(0)
     for k in ('basis','material','rounding'): refs['horizontal_formwork.'+k] = text(comp.get(k+'_evidence_id'), '水平模板原件', 200)
     for i, d in enumerate(selected, 1):
-        if not isinstance(d, dict) or set(d) != {'name','material_index','face','measurement_basis','evidence'} | ({'level_index'} if d.get('face') == 'step' else {'hole_index'} if isinstance(d.get('face'),str) and d['face'] in ends.FACES else set()):
+        if not isinstance(d, dict) or set(d)-{'plan_range'} != {'name','material_index','face','measurement_basis','evidence'} | ({'level_index'} if d.get('face') == 'step' else {'hole_index'} if isinstance(d.get('face'),str) and d['face'] in ends.FACES else set()):
             raise DomainError('水平模板范围仅含名称、基础项、水平面、实际接触说明及原件；平台另选下层序号，孔底/孔顶另选孔序号，尺寸/标高/数量均来自已审来源')
         if type(d['material_index']) is not int or d['material_index'] not in items: raise DomainError('水平模板基础项须为已审来源存在的整数序号')
         if not isinstance(d['face'], str) or d['face'] not in FACES: raise DomainError('水平模板须选择整体顶底、台阶整个平台或指定已审孔的内部孔底/孔顶')
@@ -108,11 +110,14 @@ def calculate(comp, source=None):
         if name in names: raise DomainError('水平模板范围名称不能重复')
         names.add(name)
         item = items[d['material_index']]
+        if windows.enabled(d):
+            if d['face'] not in ('top','bottom'): raise DomainError('局部XY窗口当前仅支持整体顶面或整体底面，台阶平台及孔端须另核')
+            windows.validate_config(d['plan_range']); windows.check_frames([d],selected[:i-1])
         if d['face'] in ends.FACES: ends.hole(item,d['hole_index'])
         if d['face']=='step' and (type(d['level_index']) is not int or not 1 <= d['level_index'] < len(layers(item))):
             raise DomainError('台阶平台须选择实际存在且有紧邻上层的整数下层序号')
         claim = claim_key(d)
-        if claim in claims: raise DomainError('同基础项同整端面不能重复计量')
+        if any(claim_key(a)==claim and windows.overlaps(a,d) for a in selected[:i-1]): raise DomainError('同基础项同端面整面或XY窗口范围正重叠，不能重复计量')
         claims.add(claim)
         if not isinstance(d['evidence'], dict) or set(d['evidence']) != {'measurement_basis'}: raise DomainError('每项整端面实际接触说明须单独关联原件')
         text(d['measurement_basis'], '本整端面实际接触及孔扣减说明')
@@ -124,6 +129,8 @@ def calculate(comp, source=None):
             tier,z,single_gross,gross_ast,holes,extra,extra_asts = steps.geometry(item,d['level_index'])
         else:
             tier,z,single_gross,gross_ast,holes = geometry(item,d['face'])
+        if windows.enabled(d):
+            single_gross,gross_ast,holes,extra,extra_asts = windows.geometry(d,item,tier,single_gross,gross_ast,holes,'horizontal_formwork.'+str(i),dimensions,refs,conversions)
         single_cut = sum((Decimal(h['single_area']) for h in holes), Decimal(0)); single_net = single_gross-single_cut
         if single_net < 0: raise DomainError('水平端面实际孔面积超过毛面积，请核对已审几何')
         count = Decimal(item['total_count']); count_ast = item['formula_asts']['total_count']; cut_ast = op('add', *[h['formula_ast'] for h in holes]); net_ast = op('subtract', gross_ast, cut_ast); total_ast = op('multiply', net_ast, count_ast)
@@ -140,14 +147,15 @@ def calculate(comp, source=None):
     has_step = any(d['face']=='step' for d in rows)
     has_curve = any(h.get('curved_intersection') for d in rows for h in d['apertures'])
     has_end = any(d['face'] in ends.FACES for d in rows)
+    has_window = any(windows.enabled(d) for d in rows)
     return dict(quantity=str(q), gross=str(gross), deduction=str(cut), unit='m²', parameters={}, material=comp['material'],
-                formula=('Σ[(所选水平面实际毛面积−实际孔交集)×全部基础个数]；孔端毛面积=所选孔与混凝土侧层交集，扣该侧相接孔交集；仅总净面积HALF_UP修约' if has_end else 'Σ[(已选水平面毛面积−该面实际孔交集)×已审全部基础个数]；平台毛面积=下层截面−上层完整截面；仅总净面积HALF_UP修约' if has_step else 'Σ[(已选整体顶面或底面真实截面−贯通该端面的实际孔截面)×已审全部基础个数]；仅总净面积HALF_UP修约')+str(digits)+'位',
+                formula=('Σ[(已选整面或XY窗口与真实端层交集−本范围内实际孔交集)×全部基础个数]；仅总净面积HALF_UP修约' if has_window else 'Σ[(所选水平面实际毛面积−实际孔交集)×全部基础个数]；孔端毛面积=所选孔与混凝土侧层交集，扣该侧相接孔交集；仅总净面积HALF_UP修约' if has_end else 'Σ[(已选水平面毛面积−该面实际孔交集)×已审全部基础个数]；平台毛面积=下层截面−上层完整截面；仅总净面积HALF_UP修约' if has_step else 'Σ[(已选整体顶面或底面真实截面−贯通该端面的实际孔截面)×已审全部基础个数]；仅总净面积HALF_UP修约')+str(digits)+'位',
                 formula_ast=dict(op='round',args=[op('add',*nodes)],digits=digits,mode='HALF_UP'), dimensions=dimensions, source_evidence=refs,
-                unit_conversions=[], source_unit_conversions=r['unit_conversions'], source_geometry=snapshot(source), source_component_id=source['id'],
+                unit_conversions=conversions, source_unit_conversions=r['unit_conversions'], source_geometry=snapshot(source), source_component_id=source['id'],
                 source_component_hash=comp['source_component_hash'], contact_ranges=rows,
                 horizontal_formwork_summary=dict(source_name=source['name'],source_revision=source['revision'],range_count=len(rows),unrounded_quantity=str(net),rounding_digits=digits,rounding_adjustment=str(q-net)),
                 **({'horizontal_formwork_pi_constant':PI} if has_pi else {}),
-                rounding_rule='Decimal 80位及记录的固定π，沿用来源未修约尺寸和全部最终基础个数；逐面逐孔不修约，仅总净面积HALF_UP修约',rule_version=ends.VERSION if has_end else 'foundation-horizontal-formwork-1.2' if has_curve else 'foundation-horizontal-formwork-1.1' if has_step else VERSION,notice=ends.NOTICE if has_end else steps.CURVED_NOTICE if has_curve else steps.NOTICE if has_step else NOTICE)
+                rounding_rule='Decimal 80位及记录的固定π，沿用来源未修约尺寸和全部最终基础个数；逐面逐孔不修约，仅总净面积HALF_UP修约',rule_version=windows.VERSION if has_window else ends.VERSION if has_end else 'foundation-horizontal-formwork-1.2' if has_curve else 'foundation-horizontal-formwork-1.1' if has_step else VERSION,notice=windows.NOTICE if has_window else ends.NOTICE if has_end else steps.CURVED_NOTICE if has_curve else steps.NOTICE if has_step else NOTICE,**({'horizontal_window_checks':windows.checks(rows)} if has_window else {}))
 
 
 def validate(p, comp, saved=False):
