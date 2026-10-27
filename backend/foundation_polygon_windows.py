@@ -115,6 +115,15 @@ class PolygonScene(Scene):
             if 'circle' not in p: continue
             cx,cy,r,_ = p['circle']
             for aa,bb,cc,endpoints in equations:
+                if getattr(self,'canonical_horizontal_events',False) and not aa.v and bb.v:
+                    # Use the same horizontal-circle expression as Scene. Scaled
+                    # quadratic coefficients can round this identical event to
+                    # a second adjacent 200-digit value, inventing a false strip.
+                    # This is algebraic normalization, never a distance tolerance.
+                    boundary=bind((N(0)-cc)/bb);dy=bind(boundary-cy)
+                    if abs(dy.v)>r.v:continue
+                    dx=bind((square(r)-square(dy)).sqrt())
+                    self.add(bind(cx-dx));self.add(bind(cx+dx));continue
                 # Implicit line coefficients remain exact for finite input
                 # decimals; dividing to a slope first would split shared vertices.
                 c = bind(aa*cx+bb*cy+cc); A = bind(square(aa)+square(bb)); B = bind(N(2)*aa*c); C = bind(square(c)-square(bb)*square(r))

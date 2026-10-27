@@ -23,6 +23,8 @@ def enabled(d):return isinstance(d,dict) and 'plan_range' in d
 
 
 def bounds(d):
+    from . import foundation_mixed_islands as mixed
+    if mixed.enabled(d):return mixed.bounds(d)
     from . import foundation_circular_islands as islands
     if islands.enabled(d):return islands.bounds(d)
     from . import foundation_circular_holes_windows as circular_holes
@@ -45,6 +47,9 @@ def bounds(d):
 
 
 def validate_config(c):
+    from . import foundation_mixed_islands as mixed
+    if mixed.enabled(dict(plan_range=c)):
+        mixed.validate(c);return
     from . import foundation_circular_islands as islands
     if islands.enabled(dict(plan_range=c)):
         islands.validate(c);return
@@ -98,6 +103,8 @@ def check_frames(rows,others,conflict=False):
 
 def overlaps(a,b):
     if not (enabled(a) and enabled(b)):return True
+    from . import foundation_mixed_islands as mixed
+    if mixed.enabled(a) or mixed.enabled(b):return mixed.separation(a,b)['overlap']
     from . import foundation_circular_islands as islands
     if islands.enabled(a) or islands.enabled(b):return islands.separation(a,b)['overlap']
     from . import foundation_circular_holes_windows as circular_holes
@@ -157,6 +164,10 @@ def checks(rows):
             if not enabled(b) or a['material_index']!=b['material_index'] or a['face']!=b['face']:continue
             if a['face']=='step' and a['level_index']!=b['level_index']:continue
             if a['face'] in ('hole_bottom','hole_top') and a['hole_index']!=b['hole_index']:continue
+            from . import foundation_mixed_islands as mixed
+            if mixed.enabled(a) or mixed.enabled(b):
+                result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],**mixed.separation(b,a)))
+                continue
             from . import foundation_circular_islands as islands
             if islands.enabled(a) or islands.enabled(b):
                 result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],**islands.separation(b,a)))

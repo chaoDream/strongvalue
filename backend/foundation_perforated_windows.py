@@ -74,9 +74,9 @@ class PerforatedScene(simple.SimpleScene):
         return area,node,trace
 
 
-def geometry(*args):
+def geometry(*args,scene_type=PerforatedScene):
     c=args[0]['plan_range']
-    gross,node,holes,extra,nodes=polygon.geometry(*args,scene_type=PerforatedScene,inner_rings=c['holes'])
+    gross,node,holes,extra,nodes=polygon.geometry(*args,scene_type=scene_type,inner_rings=c['holes'])
     extra.update(perforated_polygon_window=True,window_intersection_rule=RULE,window_ring_checks=topology(c))
     for h in holes:h['intersection_rule']=h['intersection_rule'].replace('凸多边形窗口','扣内孔后的窗口净区')
     return gross,node,holes,extra,nodes

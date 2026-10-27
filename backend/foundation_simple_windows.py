@@ -129,8 +129,8 @@ class SimpleScene(convex.PolygonScene):
                     working_digits=PRECISION,output_digits=80,pi_constant=PI,terms=terms,**({'partitions':partitions} if certify else {}))
 
 
-def geometry(*args):
-    gross,node,holes,extra,nodes=convex.geometry(*args,scene_type=SimpleScene)
+def geometry(*args,scene_type=SimpleScene):
+    gross,node,holes,extra,nodes=convex.geometry(*args,scene_type=scene_type)
     extra.update(simple_polygon_window=True,window_intersection_rule=RULE)
     for h in holes:h['intersection_rule']=h['intersection_rule'].replace('凸多边形窗口','简单多边形窗口')
     return gross,node,holes,extra,nodes
