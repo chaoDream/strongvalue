@@ -193,7 +193,7 @@ class PolygonScene(Scene):
                    working_digits=PRECISION,output_digits=80,pi_constant=PI,terms=terms,**({'partitions':partitions} if certify else {}))
 
 
-def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions):
+def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions,scene_type=PolygonScene):
     c = d['plan_range']; nodes = {}
     for k in keys(c):
         dimensions[key+'.'+k] = str(c['parameters'][k]); refs[key+'.'+k] = c['evidence'][k]
@@ -227,7 +227,7 @@ def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions
         if d['face'] == 'step':
             up,ua,_,_ = steps.section(item,layers(item)[d['level_index']])
             exclude = [profile(up,ua,'上层完整截面')]
-        def measure(inc, exc=()): return PolygonScene(inc+list(exc),pts,bind).measure(inc,exc)
+        def measure(inc, exc=()): return scene_type(inc+list(exc),pts,bind).measure(inc,exc)
         gross,node,trace = measure(include,exclude)
         hole_profiles = []
         for h in holes:
@@ -252,7 +252,7 @@ def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions
                 q.update(full_end_intersection_area=h['single_area'],window_direct_area=str(amount))
                 q['formula_asts'].update(full_end_intersection_area=h['formula_ast'],window_direct_area=an)
             clipped.append(q)
-        net_scene=PolygonScene(include+exclude+hole_profiles,pts,bind)
+        net_scene=scene_type(include+exclude+hole_profiles,pts,bind)
         direct_net,net_node,net_trace = net_scene.measure(include,exclude+hole_profiles,certify=True)
         zero_proof = None
         if gross > 0 and not net_trace['terms'] and clipped:

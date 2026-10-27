@@ -24,12 +24,16 @@ def enabled(d):return isinstance(d,dict) and 'plan_range' in d
 
 def bounds(d):
     from . import foundation_polygon_windows as polygon
-    if polygon.enabled(d): return polygon.bounds(d)
+    from . import foundation_simple_windows as simple
+    if polygon.enabled(d) or simple.enabled(d): return polygon.bounds(d)
     c=d['plan_range'];return tuple(linear(c['parameters'][k],c['unit']) for k in FIELDS)
 
 
 def validate_config(c):
     from . import foundation_polygon_windows as polygon
+    from . import foundation_simple_windows as simple
+    if simple.enabled(dict(plan_range=c)):
+        simple.validate(c); return
     if polygon.enabled(dict(plan_range=c)):
         polygon.validate(c); return
     if not isinstance(c,dict) or set(c)!={'parameters','unit','evidence','coordinate_basis','coordinate_evidence_id','scope_confirmed'} or not isinstance(c['parameters'],dict) or set(c['parameters'])!=set(FIELDS) or not isinstance(c['evidence'],dict) or set(c['evidence'])!=set(FIELDS):
@@ -55,6 +59,8 @@ def check_frames(rows,others,conflict=False):
 
 def overlaps(a,b):
     if not (enabled(a) and enabled(b)):return True
+    from . import foundation_simple_windows as simple
+    if simple.enabled(a) or simple.enabled(b):return simple.separation(a,b)['overlap']
     from . import foundation_polygon_windows as polygon
     if polygon.enabled(a) or polygon.enabled(b):return polygon.separation(a,b)['gap'] < 0
     ax,ae,ay,af=bounds(a);bx,be,by,bf=bounds(b)
@@ -96,6 +102,11 @@ def checks(rows):
             if not enabled(b) or a['material_index']!=b['material_index'] or a['face']!=b['face']:continue
             if a['face']=='step' and a['level_index']!=b['level_index']:continue
             if a['face'] in ('hole_bottom','hole_top') and a['hole_index']!=b['hole_index']:continue
+            from . import foundation_simple_windows as simple
+            if simple.enabled(a) or simple.enabled(b):
+                s=simple.separation(b,a)
+                result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],**s))
+                continue
             from . import foundation_polygon_windows as polygon
             if polygon.enabled(a) or polygon.enabled(b):
                 s=polygon.separation(a,b)
