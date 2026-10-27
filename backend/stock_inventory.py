@@ -16,7 +16,7 @@ router = APIRouter(prefix='/api/v1')
 COLLECTIONS = ('stock_receipts', 'stock_reservations', 'stock_events', 'stock_operations', 'stock_processing_results', 'stock_offcut_reservations', 'stock_offcut_returns', 'stock_offcut_processing', 'stock_offcut_jobs', 'stock_offcut_counts', 'stock_counts', 'stock_offcut_issues')
 NOTICE = ('仅本项目完整原材按批登记和预留，数量单位为根。已审登记且原件有效才可新增预留；预留提交即占用，独立复核后标明已审。'
           '被拒、待补件或来源失效的预留继续占用，必须有据显式释放；不会自动退库。库存长度及每米质量须与所选已审排料相等，材质截面兼容性须另有原件确认，不能仅凭名称或每米质量认定。'
-          '一次预留完整覆盖一个材料表当前排料需求，可分配多个批次；同材料表只能有一份未释放预留，未领料时修订须先核查并释放旧预留；已领料材料表不能二次预留。'
+          '一次预留完整覆盖一个材料表当前排料需求，可分配多个批次；同材料表只能有一份未释放预留，未领料时修订须先核查并释放旧预留；已领料材料表不能再做全量预留；已释放未领余量仅可走独立补料入口。'
           '不改变排料、净工程量、清单、报价或历史文件；完整原材首次可整单或按原分配分批领料，未领部分继续占用，部分领出后可有据释放未领余量；领料、投入加工和完整原材退回须按本次领用单据独立复核后显式执行；不自动回用余料、跨项目共享、采购价格、采购入库或仓库实物自动盘点。登记核查不代表外部仓库验收。')
 
 
@@ -165,7 +165,10 @@ def validate_reservation(p, row):
     intact(row)
     if not active(p, row):
         fail('预留已释放，不能重新审定或再次占用')
-    d = demands(p, row['source_id'])
+    if 'replenishment' in row:
+        from .stock_replenishments import validate
+        d=validate(p,row)
+    else:d = demands(p, row['source_id'])
     if d != row['demand']:
         fail('排料来源或需求已变化；旧预留继续占用，核查后须显式释放再重新预留')
     if proofs(p, [row['evidence_id']]) != row['proof_stamp']:
@@ -210,7 +213,8 @@ def status(p):
     from .stock_offcut_counts import status as count_status
     from .stock_counts import status as stock_count_status
     from .stock_offcut_issues import status as offcut_issue_status
-    return dict(offcut_issues=offcut_issue_status(p), stock_counts=stock_count_status(p), offcut_counts=count_status(p), offcut_jobs=job_status(p), offcut_processing=offcut_processing_status(p), offcut_returns=return_status(p), offcut_reuse=reuse_status(p), processing=processing_status(p), receipts=receipts, reservations=reservations, events=p['stock_events'], operations=operation_status(p), operation_notice=OPERATION_NOTICE, ledger_hash=ledger_hash(p), notice=NOTICE)
+    from .stock_replenishments import status as replenishment_status
+    return dict(replenishments=replenishment_status(p), offcut_issues=offcut_issue_status(p), stock_counts=stock_count_status(p), offcut_counts=count_status(p), offcut_jobs=job_status(p), offcut_processing=offcut_processing_status(p), offcut_returns=return_status(p), offcut_reuse=reuse_status(p), processing=processing_status(p), receipts=receipts, reservations=reservations, events=p['stock_events'], operations=operation_status(p), operation_notice=OPERATION_NOTICE, ledger_hash=ledger_hash(p), notice=NOTICE)
 
 
 def fields(body, expected):

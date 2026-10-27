@@ -12,10 +12,10 @@ router = APIRouter(prefix='/api/v1')
 ISSUE_KINDS={'issue','partial_issue'}
 KINDS = {'issue': '整单领料','partial_issue':'分批领料', 'consume': '完整原材投入加工', 'return': '未加工完整原材退回'}
 NOTICE = ('完整原材领料仅从当前有效已审预留建立，可首次整单领料或按原分配序号分批领料；提交及复核均不改变库存，编制人显式执行已审单据后才记账。'
-          '本次领出的根数从预留转成出库，未领部分继续占用，不增加可用库存；同材料表已领料后不能二次预留。投入加工和退回按已执行领料的逐项未加工余额记录，可分批但不得超量。'
+          '本次领出的根数从预留转成出库，未领部分继续占用，不增加可用库存；同材料表已领料后不能重新做全量预留；已释放未领余量仅可走独立补料入口。投入加工和退回按已执行领料的逐项未加工余额记录，可分批但不得超量。'
           '投入加工按完整原材根数退出完整根台账，不代表净安装工程量或加工损耗；加工后的余料不能当作完整原材退回。'
           '来源修订、原件失效或审批问题不撤销既有实物记账；新领料阻断，已执行领料的后续实际加工／完整退回可凭当前有效交接原件记录，历史问题另行警示。'
-          '已执行单据不可取消或重审；未执行单据可有据取消。余料回用及未加工原段退回须走各自独立入口；完整原材在库盘点须走独立盘点入口；分批领料须预览、独立复核及显式执行；部分领出后可有据释放未领余量，不退回已领数量，不重开同材料表。尚不支持余料分批领用、在外或已加工盘点、跨项目共享或采购闭环；不改净工程量、排料或报价。')
+          '已执行单据不可取消或重审；未执行单据可有据取消。余料回用及未加工原段退回须走各自独立入口；完整原材在库盘点须走独立盘点入口；分批领料须预览、独立复核及显式执行；部分领出后可有据释放未领余量，不退回已领数量；未领余量补料另走独立入口，不重开全量需求。余料分批领用使用独立入口；尚不支持在外或已加工盘点、跨项目共享或采购闭环；不改净工程量、排料或报价。')
 
 
 def execution(p, oid):
@@ -85,6 +85,8 @@ def totals(rows):
 def balances(p):
     """Replay executed movements only. A failed current proof never credits stock back."""
     from . import stock_counts as counts
+    from .stock_replenishments import audit
+    audit(p)
     stock = {r['id']: dict(issued=0, returned=0, consumed=0,adjustment_gain=0,adjustment_loss=0,count_revision=0) for r in p['stock_receipts']}
     issues = {}; reservations = {}; applied = set(); stopped=set(); released=set()
     ops = {r['id']: r for r in p['stock_operations']}
@@ -121,6 +123,9 @@ def balances(p):
         applied.add(row['id'])
         if kind in ISSUE_KINDS:
             rid=row['input']['reference_id'];reservation=core.find(p,'stock_reservations',rid)
+            if 'replenishment' in reservation:
+                release_id=reservation['replenishment']['release_id']
+                if not any(x['id']==release_id for x in p['stock_events'][:p['stock_events'].index(event)]):inv.fail('补料领出早于上游未领余量释放')
             if rid in released or event['reservation_id']!=rid or row['reservation_id']!=rid or not inv.approved(p,'stock_reservations',reservation):inv.fail('领料预留关联、独立复核或释放顺序异常')
             before=reservations.setdefault(rid,{})
             expected=frozen_rows(p,reservation)
