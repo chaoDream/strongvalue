@@ -23,6 +23,8 @@ def enabled(d):return isinstance(d,dict) and 'plan_range' in d
 
 
 def bounds(d):
+    from . import foundation_eccentric_windows as eccentric
+    if eccentric.enabled(d):return eccentric.bounds(d)
     from . import foundation_annular_windows as annular
     if annular.enabled(d):return annular.bounds(d)
     from . import foundation_circular_windows as circular
@@ -39,6 +41,9 @@ def bounds(d):
 
 
 def validate_config(c):
+    from . import foundation_eccentric_windows as eccentric
+    if eccentric.enabled(dict(plan_range=c)):
+        eccentric.validate(c);return
     from . import foundation_annular_windows as annular
     if annular.enabled(dict(plan_range=c)):
         annular.validate(c);return
@@ -83,6 +88,8 @@ def check_frames(rows,others,conflict=False):
 
 def overlaps(a,b):
     if not (enabled(a) and enabled(b)):return True
+    from . import foundation_eccentric_windows as eccentric
+    if eccentric.enabled(a) or eccentric.enabled(b):return eccentric.separation(a,b)['overlap']
     from . import foundation_annular_windows as annular
     if annular.enabled(a) or annular.enabled(b):return annular.separation(a,b)['overlap']
     from . import foundation_circular_windows as circular
@@ -136,6 +143,10 @@ def checks(rows):
             if not enabled(b) or a['material_index']!=b['material_index'] or a['face']!=b['face']:continue
             if a['face']=='step' and a['level_index']!=b['level_index']:continue
             if a['face'] in ('hole_bottom','hole_top') and a['hole_index']!=b['hole_index']:continue
+            from . import foundation_eccentric_windows as eccentric
+            if eccentric.enabled(a) or eccentric.enabled(b):
+                result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],**eccentric.separation(b,a)))
+                continue
             from . import foundation_annular_windows as annular
             if annular.enabled(a) or annular.enabled(b):
                 result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],**annular.separation(b,a)))
