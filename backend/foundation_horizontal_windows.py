@@ -23,6 +23,8 @@ def enabled(d):return isinstance(d,dict) and 'plan_range' in d
 
 
 def bounds(d):
+    from . import foundation_circular_windows as circular
+    if circular.enabled(d):return circular.bounds(d)
     from . import foundation_nested_windows as nested
     if nested.enabled(d):return nested.bounds(d)
     from . import foundation_multi_windows as multi
@@ -35,6 +37,9 @@ def bounds(d):
 
 
 def validate_config(c):
+    from . import foundation_circular_windows as circular
+    if circular.enabled(dict(plan_range=c)):
+        circular.validate(c); return
     from . import foundation_nested_windows as nested
     if nested.enabled(dict(plan_range=c)):
         nested.validate(c); return
@@ -73,6 +78,8 @@ def check_frames(rows,others,conflict=False):
 
 def overlaps(a,b):
     if not (enabled(a) and enabled(b)):return True
+    from . import foundation_circular_windows as circular
+    if circular.enabled(a) or circular.enabled(b):return circular.separation(a,b)['overlap']
     from . import foundation_nested_windows as nested
     if nested.enabled(a) or nested.enabled(b):return nested.separation(a,b)['overlap']
     from . import foundation_multi_windows as multi
@@ -122,6 +129,10 @@ def checks(rows):
             if not enabled(b) or a['material_index']!=b['material_index'] or a['face']!=b['face']:continue
             if a['face']=='step' and a['level_index']!=b['level_index']:continue
             if a['face'] in ('hole_bottom','hole_top') and a['hole_index']!=b['hole_index']:continue
+            from . import foundation_circular_windows as circular
+            if circular.enabled(a) or circular.enabled(b):
+                result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],**circular.separation(b,a)))
+                continue
             from . import foundation_nested_windows as nested
             if nested.enabled(a) or nested.enabled(b):
                 result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],**nested.separation(b,a)))

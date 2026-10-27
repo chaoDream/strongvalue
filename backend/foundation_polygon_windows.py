@@ -196,9 +196,9 @@ class PolygonScene(Scene):
                    working_digits=PRECISION,output_digits=80,pi_constant=PI,terms=terms,**({'partitions':partitions} if certify else {}))
 
 
-def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions,scene_type=PolygonScene,inner_rings=()):
+def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions,scene_type=PolygonScene,inner_rings=(),parameter_keys=keys,window_builder=None):
     c = d['plan_range']; nodes = {}
-    for k in keys(c):
+    for k in parameter_keys(c):
         dimensions[key+'.'+k] = str(c['parameters'][k]); refs[key+'.'+k] = c['evidence'][k]
         nodes[k] = op('multiply',{'dimension':key+'.'+k},{'constant':LENGTH[c['unit']]})
         conversions.append(dict(parameter=key+'.'+k,original_value=str(c['parameters'][k]),source_unit=c['unit'],factor=LENGTH[c['unit']],canonical_value=str(linear(c['parameters'][k],c['unit'])),canonical_unit='m',rule_version=UNIT_VERSION))
@@ -223,13 +223,16 @@ def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions
                 definitions.append(dict(dimension=name,value=str(n.v),formula_ast=dict(op='decimal_precision',args=[n.a],working_digits=PRECISION,output_digits=PRECISION,mode='HALF_EVEN')))
                 dimensions[name]=str(n.v);expressions[fingerprint]=name
             return N(n.v,{'dimension':expressions[fingerprint]})
-        pts = [(N(x,nodes['x'+str(i)]),N(y,nodes['y'+str(i)])) for i,(x,y) in enumerate(vertices(c),1)]
-        # Translate the shoelace sum to the first vertex for numerical stability.
-        window = N(0); origin = pts[0]
-        for a,b in zip(pts[1:-1],pts[2:]):
-            window = window+(a[0]-origin[0])*(b[1]-origin[1])-(a[1]-origin[1])*(b[0]-origin[0])
-        window = window/N(2)
-        if window.v < 0: window = N(0)-window
+        if window_builder is not None:
+            pts,window=window_builder(c,nodes)
+        else:
+            pts = [(N(x,nodes['x'+str(i)]),N(y,nodes['y'+str(i)])) for i,(x,y) in enumerate(vertices(c),1)]
+            # Translate the shoelace sum to the first vertex for numerical stability.
+            window = N(0); origin = pts[0]
+            for a,b in zip(pts[1:-1],pts[2:]):
+                window = window+(a[0]-origin[0])*(b[1]-origin[1])-(a[1]-origin[1])*(b[0]-origin[0])
+            window = window/N(2)
+            if window.v < 0: window = N(0)-window
         all_points=[pts]; ring_rows=[]; outer_window=window; hole_window=N(0)
         if inner_rings:
             ring_rows.append(dict(index=0,name='外轮廓',role='outer',area=str(value(window)),formula_ast=ast(window),vertices=[dict(x=str(value(x)),y=str(value(y))) for x,y in pts]))
@@ -292,7 +295,7 @@ def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions
                 h.update(single_area=str(amount),formula_ast=an); h['formula_asts']['single_area'] = an
                 h['intersection_rule'] += '；全部边界分段无剩余接触，按毛面积减其他孔扣的分割恒等式计量'
                 zero_proof = dict(method='全部边界事件分段扣除上层与实际孔后无剩余区间，严格零接触；分割余项非容差归零',canonical_hole_index=h['hole_index'],net_trace=net_trace)
-        bx = bounds(d); ast_bounds = {}
+        bx = tuple(fn(p[axis].v for p in pts) for axis,fn in [(0,min),(0,max),(1,min),(1,max)]) if window_builder else bounds(d); ast_bounds = {}
         for k,axis,fn in [('x_start',0,min),('x_end',0,max),('y_start',1,min),('y_end',1,max)]:
             ast_bounds[k] = fn(pts,key=lambda p:p[axis].v)[axis].a
         extra = dict(**dict(zip(('x_start','x_end','y_start','y_end'),map(str,bx))),plan_bounds=dict(zip(('x_start','x_end','y_start','y_end'),map(str,bx))),
