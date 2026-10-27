@@ -102,9 +102,9 @@ def window_tables(snapshot):
         (WINDOW_TITLES[1],['模板 / 窗口 / 孔','孔全截面 / 与窗口交集（m²）','交集口径'],[
             [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index'])+' '+h['name'],h['full_area']+' / '+h['single_area'],h['intersection_rule']+'；按该端面起止Z条件取孔，再与窗口裁切'] for t,d in rows for h in d['apertures']] or [['—','0 / 0','所选端面无到达本标高的孔']]),
         (WINDOW_TITLES[2],['模板 / 窗口','原始坐标及单位','逐坐标原件','共用基础XY基准及原件'],[
-            [t['name']+' / C'+str(d['index'])+' '+d['name'],'；'.join(k+'='+str(v) for k,v in d['plan_range']['parameters'].items())+' '+d['plan_range']['unit'],'；'.join(k+'：'+v for k,v in d['plan_range']['evidence'].items()),d['plan_range']['coordinate_basis']+'；原件：'+d['plan_range']['coordinate_evidence_id']+'；校验：'+d['plan_frame_hash']] for t,d in rows]),
+            [t['name']+' / C'+str(d['index'])+' '+d['name'],('多块坐标逐点见基础多块窗口顶点表' if d.get('multi_polygon_window') else '；'.join(k+'='+str(v) for k,v in d['plan_range']['parameters'].items()))+' '+d['plan_range']['unit'],('逐块及逐孔原件见基础多块窗口顶点表' if d.get('multi_polygon_window') else '；'.join(k+'：'+v for k,v in d['plan_range']['evidence'].items())),d['plan_range']['coordinate_basis']+'；原件：'+d['plan_range']['coordinate_evidence_id']+'；校验：'+d['plan_frame_hash']] for t,d in rows]),
         (WINDOW_TITLES[3],['模板 / 两窗口','X / Y有向间隔（m）','状态及重复检查口径'],[
-            [t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],('精确有理数竖向扫描；'+str(len(c['partitions']))+'个共同X分段，逐段内部片段无正重叠' if c.get('method') in ('simple_polygon_vertical_sweep','perforated_polygon_vertical_sweep') else '分离轴('+c['axis_x']+','+c['axis_y']+')；投影间隔='+c['projection_gap']+'m²（未单位化轴）' if c.get('method')=='convex_separating_axis' else c['x_gap']+' / '+c['y_gap']),('分离' if c['state']=='separated' else '共享边界')+('；按完整窗口全部直边交点分段，凹口空区不视作重叠，正重叠或包含拒绝' if c.get('method') in ('simple_polygon_vertical_sweep','perforated_polygon_vertical_sweep') else '；凸窗口按全部边法向分离轴判定，正重叠拒绝' if c.get('method')=='convex_separating_axis' else '；X/Y均正交叠即拒绝，整面与窗口也不能并计')] for t in ts for c in t['horizontal_window_checks']] or [['—','—','无同端面窗口对；已检查整面与窗口不重复']])
+            [t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],('精确有理数竖向扫描；'+str(len(c['partitions']))+'个共同X分段，逐段内部片段无正重叠' if c.get('method') in ('simple_polygon_vertical_sweep','perforated_polygon_vertical_sweep','multi_polygon_vertical_sweep') else '分离轴('+c['axis_x']+','+c['axis_y']+')；投影间隔='+c['projection_gap']+'m²（未单位化轴）' if c.get('method')=='convex_separating_axis' else c['x_gap']+' / '+c['y_gap']),('分离' if c['state']=='separated' else '共享边界')+('；按完整窗口全部直边交点分段，凹口空区不视作重叠，正重叠或包含拒绝' if c.get('method') in ('simple_polygon_vertical_sweep','perforated_polygon_vertical_sweep','multi_polygon_vertical_sweep') else '；凸窗口按全部边法向分离轴判定，正重叠拒绝' if c.get('method')=='convex_separating_axis' else '；X/Y均正交叠即拒绝，整面与窗口也不能并计')] for t in ts for c in t['horizontal_window_checks']] or [['—','—','无同端面窗口对；已检查整面与窗口不重复']])
     ])
     curves=[(t,d,'下层与窗口' if d['face']=='step' else '端层截面',d['window_lower_area'] if d['face']=='step' else d['single_gross_area'],d['window_curved_intersection']) for t,d in rows if d.get('window_curved_intersection')]
     curves += [(t,d,('上层窗口内孔H' if d['face']=='step' else '实际孔H')+str(h['hole_index']),h['covered_area'] if d['face']=='step' else h.get('window_direct_area',h['single_area']),h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
@@ -153,6 +153,8 @@ def tables(snapshot):
     result=polygon_window_tables(snapshot,result)
     result=simple_window_check_tables(snapshot,polygon_window_tables(snapshot,result,simple=True))
     result=perforated_window_tables(snapshot,result)
+    from .foundation_multi_window_reports import tables as multi_tables
+    result.extend(multi_tables(snapshot))
     if not rows:return result
     result.append((ROUND_WINDOW_TITLE,['模板 / 平台窗口 / 孔','区间 / X起止（m）','有效上边界 / 下边界','区间共同面积（m²）','共同交集及精度'],[
         [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index']),q['name']+' / '+q['x_from']+'至'+q['x_to'],q['upper_boundary']+' / '+q['lower_boundary'],q['area'],h['covered_area']+'；'+m['integration_rule']+'；工作200位、保留80位、固定π见规则'] for t,d,h,m in rows for q in m['terms']]))
@@ -166,7 +168,7 @@ SIMPLE_CHECK_TITLE = '基础凹窗口防重分段'
 
 def polygon_window_tables(snapshot,result,simple=False,perforated=False):
     titles=PERFORATED_TITLES if perforated else SIMPLE_POLYGON_TITLES if simple else POLYGON_TITLES
-    rows=[(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d.get('polygon_window') and bool(d.get('perforated_polygon_window'))==perforated and (perforated or bool(d.get('simple_polygon_window'))==simple)]
+    rows=[(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d.get('polygon_window') and not d.get('multi_polygon_window') and bool(d.get('perforated_polygon_window'))==perforated and (perforated or bool(d.get('simple_polygon_window'))==simple)]
     if not rows:return result
     if perforated:
         result.append((titles[0],['模板 / 范围 / 轮廓','顶点 / 原始XY及单位','规范XY（m）','逐坐标原件 / 排除说明及原件'],[
