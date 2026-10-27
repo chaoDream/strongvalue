@@ -22,7 +22,7 @@ export default function SupplierQuotesPanel({p,user,request,refresh,onReview,sou
  const life=useRef(0),reads=useRef(0);
  async function load(key=filter,offset=0){const id=++reads.current,g=life.current;const result=await request(base+'?key='+encodeURIComponent(key)+'&offset='+offset);if(g===life.current&&id===reads.current)setData(result)}
  useEffect(()=>{life.current++;setDialog(null);setFilter('');setError('');setMessage('');setData({items:[],total:0,offset:0,limit:50});return()=>{life.current++;reads.current++}},[p.id]);
- useEffect(()=>{const g=life.current;load(filter,0).catch((e:any)=>{if(g===life.current)setError(e.message)})},[p.id,p.updated_at]);
+ useEffect(()=>{const g=life.current;load(filter,0).catch((e:any)=>{if(g===life.current)setError(e.message)})},[p]);
  const pending=(p.pricing_tasks||[]).filter((t:Obj)=>t.kind==='price_inquiry');
  const targets=[...new Map<string,Obj>([...pending.map((t:Obj)=>[t.key,{key:t.key,name:t.boq_name+' / '+t.resource.name}] as [string,Obj]),...data.items.map((x:Obj)=>[x.offer.target.key,{key:x.offer.target.key,name:x.offer.target.boq_name+' / '+x.offer.target.resource.name}] as [string,Obj])]).values()];
  const evidences=p.evidence.filter((e:Obj)=>p.documents.some((d:Obj)=>d.id===e.document_id&&!d.superseded));

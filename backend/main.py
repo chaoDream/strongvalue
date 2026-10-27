@@ -21,12 +21,12 @@ from .compound_takeoff import component_quantity, structured_validator, STRUCTUR
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.133.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.134.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
                 '给排水': '管线平纵断面、材质及埋深', '电气': '配电系统及敷设方式', '合同计价': '合同、计量与取费依据'}
-REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions', 'engineering_structures', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes', 'stock_receipts', 'stock_reservations', 'stock_operations', 'stock_processing_results', 'stock_offcut_reservations', 'stock_offcut_returns', 'stock_offcut_processing', 'stock_offcut_jobs', 'stock_offcut_counts', 'stock_counts', 'stock_offcut_issues'}
+REVIEW_COLLECTIONS = {'facts', 'components', 'takeoffs', 'boq', 'rules', 'coverage', 'quotes', 'changes', 'catalog', 'dimension_candidates', 'reconciliations', 'price_changes', 'boq_mappings', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'resource_substitutions', 'engineering_structures', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes', 'stock_receipts', 'stock_reservations', 'stock_operations', 'stock_processing_results', 'stock_offcut_reservations', 'stock_offcut_returns', 'stock_offcut_processing', 'stock_offcut_jobs', 'stock_offcut_counts', 'stock_counts', 'stock_offcut_issues', 'procurement_analyses'}
 
 
 def password_hash(password, salt=None):
@@ -92,7 +92,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes', 'supplier_quote_adoptions', 'supplier_inquiry_reopenings', 'dxf_route_adoptions', 'stock_receipts', 'stock_reservations', 'stock_events', 'stock_operations', 'stock_processing_results', 'stock_offcut_reservations', 'stock_offcut_returns', 'stock_offcut_processing', 'stock_offcut_jobs', 'stock_offcut_counts', 'stock_counts', 'stock_offcut_issues', 'stock_mixed_reservations']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes', 'supplier_quote_adoptions', 'supplier_inquiry_reopenings', 'dxf_route_adoptions', 'stock_receipts', 'stock_reservations', 'stock_events', 'stock_operations', 'stock_processing_results', 'stock_offcut_reservations', 'stock_offcut_returns', 'stock_offcut_processing', 'stock_offcut_jobs', 'stock_offcut_counts', 'stock_counts', 'stock_offcut_issues', 'stock_mixed_reservations', 'procurement_analyses']:
         p.setdefault(key, [])
     return p
 
@@ -969,6 +969,9 @@ def apply_review(c, p, body, a, hash_verified=False):
         from .quantity_diagnosis import latest
         if latest(p, target['reconciliation_id'], target['target_key'])['id'] != target['id']:
             raise HTTPException(409, '历史诊断只供查阅，请复核最新诊断版本')
+    if collection == 'procurement_analyses':
+        from .procurement_analyses import reviewable
+        reviewable(p,target,a)
     if collection == 'stock_counts':
         from .stock_counts import reviewable
         reviewable(p,target,a)
@@ -1011,6 +1014,9 @@ def apply_review(c, p, body, a, hash_verified=False):
         mixed_reviewable(p,target)
     approve = body['decision'] == 'approve'
     if approve:
+        if collection == 'procurement_analyses':
+            from .procurement_analyses import validate
+            validate(p,target)
         if collection == 'stock_counts':
             from .stock_counts import validate
             validate(p,target)
@@ -1185,7 +1191,7 @@ def apply_review(c, p, body, a, hash_verified=False):
                     find(p, 'takeoffs', b['takeoff_id'])['state'] = 'stale'
         if not approve and collection in ('drawing_sheets','drawing_references'):
             invalidate(p,'components' if collection=='drawing_sheets' else 'quotes')
-        elif not approve and collection not in ('engineering_settlements', 'integration_trials', 'supplier_quotes', 'stock_receipts', 'stock_reservations', 'stock_operations', 'stock_processing_results', 'stock_offcut_reservations', 'stock_offcut_returns', 'stock_offcut_processing', 'stock_offcut_jobs', 'stock_offcut_counts', 'stock_counts', 'stock_offcut_issues'):
+        elif not approve and collection not in ('engineering_settlements', 'integration_trials', 'supplier_quotes', 'stock_receipts', 'stock_reservations', 'stock_operations', 'stock_processing_results', 'stock_offcut_reservations', 'stock_offcut_returns', 'stock_offcut_processing', 'stock_offcut_jobs', 'stock_offcut_counts', 'stock_counts', 'stock_offcut_issues', 'procurement_analyses'):
             if collection == 'boq_mappings':
                 from .boq_mapping import invalidate_dependents
                 invalidate_dependents(p, {target['id']})
@@ -1531,6 +1537,9 @@ app.include_router(supplier_quotes_router)
 
 from .dxf_routes import router as dxf_routes_router
 app.include_router(dxf_routes_router)
+
+from .procurement_analyses import router as procurement_analyses_router
+app.include_router(procurement_analyses_router)
 
 dist = Path(__file__).parent.parent/'frontend'/'dist'
 if dist.exists():

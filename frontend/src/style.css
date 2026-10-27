@@ -2823,3 +2823,9 @@ input::placeholder,textarea::placeholder {
 
 .stock-operations > h4,.stock-operations > .form-note {margin:18px 22px 10px;}
 .stock-operations td .actions,.stock-inventory-panel td .actions {flex-wrap:wrap;}
+
+.procurement-cost-preview {margin-top:20px;padding:18px;background:#f7faf6;border:1px solid #dbe5d6;border-radius:8px;min-width:0;}
+.procurement-cost-details {min-width:0;width:100%;overflow-wrap:anywhere;}
+.procurement-cost-details table {table-layout:fixed;width:100%;min-width:680px;}
+.procurement-cost-details th,.procurement-cost-details td {white-space:normal;overflow-wrap:anywhere;vertical-align:top;}
+.procurement-cost-details button {max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left;}
