@@ -2814,3 +2814,9 @@ input::placeholder,textarea::placeholder {
 .stock-cutting-details th,.stock-cutting-details td {white-space:normal;overflow-wrap:anywhere;vertical-align:top;}
 
 .mixed-cutting-details th,.mixed-cutting-details td {white-space:normal;overflow-wrap:anywhere;vertical-align:top;}
+
+.stock-inventory-panel table {table-layout:fixed;width:100%;min-width:640px;}
+.stock-inventory-panel th,.stock-inventory-panel td {white-space:normal;overflow-wrap:anywhere;vertical-align:top;}
+.stock-inventory-panel td p {margin:6px 0;line-height:1.7;}
+.stock-inventory-panel > h3,.stock-inventory-panel > details {margin:18px 22px 10px;}
+.stock-inventory-panel td .text-btn {white-space:normal;}
