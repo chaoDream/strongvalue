@@ -13,7 +13,7 @@ from .surface_takeoff import check_sources
 from . import railing_material as material
 
 router = APIRouter(prefix='/api/v1')
-COLLECTIONS = ('stock_receipts', 'stock_reservations', 'stock_events', 'stock_operations')
+COLLECTIONS = ('stock_receipts', 'stock_reservations', 'stock_events', 'stock_operations', 'stock_processing_results')
 NOTICE = ('仅本项目完整原材按批登记和预留，数量单位为根。已审登记且原件有效才可新增预留；预留提交即占用，独立复核后标明已审。'
           '被拒、待补件或来源失效的预留继续占用，必须有据显式释放；不会自动退库。库存长度及每米质量须与所选已审排料相等，材质截面兼容性须另有原件确认，不能仅凭名称或每米质量认定。'
           '一次预留完整覆盖一个材料表当前排料需求，可分配多个批次；同材料表只能有一份未释放预留，未领料时修订须先核查并释放旧预留；已领料材料表不能二次预留。'
@@ -151,7 +151,9 @@ def allocation_check(p, demand, allocations, *, availability=True):
         fail('分配根数须完整且恰好等于全部已审排料需求，不得遗漏或超量')
     for rid, n in used.items():
         receipt = core.find(p, 'stock_receipts', rid)
-        if availability and n + held(p, rid) > receipt['normalized']['quantity']:
+        from .stock_operations import balances
+        stock, _ = balances(p)
+        if availability and n + held(p, rid) > stock[rid]['on_hand']:
             fail('批次可用根数不足，其他预留已占用；请刷新库存重新分配')
 
 
@@ -195,7 +197,8 @@ def status(p):
         except HTTPException as e:
             issue = str(e.detail)
         reservations.append(dict(record=r, object_hash=store.digest(r), active=not released and not issued, phase='issued' if issued else 'released' if released else 'reserved', issue=issue))
-    return dict(receipts=receipts, reservations=reservations, events=p['stock_events'], operations=operation_status(p), operation_notice=OPERATION_NOTICE, ledger_hash=ledger_hash(p), notice=NOTICE)
+    from .stock_processing_results import status as processing_status
+    return dict(processing=processing_status(p), receipts=receipts, reservations=reservations, events=p['stock_events'], operations=operation_status(p), operation_notice=OPERATION_NOTICE, ledger_hash=ledger_hash(p), notice=NOTICE)
 
 
 def fields(body, expected):
@@ -250,6 +253,10 @@ def receipt(pid: str, body: dict, a=Depends(core.actor)):
         values = receipt_values(body['input']); raw = body['input']
         if any(r['input']['lot_code'].strip() == raw['lot_code'].strip() and r['input']['warehouse'].strip() == raw['warehouse'].strip() and not event_for(p, 'void', r['id']) for r in p['stock_receipts']):
             fail('同仓库同实物批号已登记；修正须先解除全部预留并有据停用原登记，不能重复计入')
+        from .stock_processing_results import balances as processing_balances
+        _, offcuts = processing_balances(p)
+        if any((o['warehouse'].strip(), o['lot_code'].strip()) == (raw['warehouse'].strip(), raw['lot_code'].strip()) for o in offcuts):
+            fail('该编号已作为实物余料入库，不能再次登记为完整原材；余料回用须另核')
         stamp = proofs(p, raw['evidence'].values())
         return commit(c, p, a, 'stock_receipts', body, dict(input=raw, normalized=values, proof_stamp=stamp, state='draft'), 'STOCK_RECEIPT_REGISTERED')
 
@@ -277,19 +284,23 @@ def reserve(pid: str, body: dict, a=Depends(core.actor)):
 @router.post('/projects/{pid}/stock-inventory/events')
 def movement(pid: str, body: dict, a=Depends(core.actor)):
     core.edit(a); fields(body, {'operation', 'target_id', 'object_hash', 'basis', 'evidence_id'})
-    if body['operation'] not in ('release', 'void', 'cancel'):
+    if body['operation'] not in ('release', 'void', 'cancel', 'cancel_processing'):
         raise HTTPException(422, '仅支持释放未领料预留、停用未占用登记或取消未执行领用单据')
     with store.transaction() as c:
         p = core.project(c, pid, a); old = begin(p, body)
         if old:
             return old
-        key = 'stock_reservations' if body['operation'] == 'release' else 'stock_operations' if body['operation'] == 'cancel' else 'stock_receipts'
+        key = 'stock_reservations' if body['operation'] == 'release' else 'stock_operations' if body['operation'] == 'cancel' else 'stock_processing_results' if body['operation']=='cancel_processing' else 'stock_receipts'
         target = core.find(p, key, body['target_id'])
         if store.digest(target) != body['object_hash']:
             fail('操作对象已变化，请刷新核对')
         if event_for(p, body['operation'], target['id']):
             fail('此操作已完成，请查看历史记录')
         from .stock_operations import issued_reservation, closed, balances
+        if body['operation'] == 'cancel_processing':
+            from .stock_processing_results import closed as processing_closed
+            if processing_closed(p, target):
+                fail('加工结果已执行或取消，不能再次取消')
         if body['operation'] == 'release' and issued_reservation(p, target['id']):
             fail('此预留已领料，不能通过释放退回库存；须凭完整原材退回单记账')
         if body['operation'] == 'cancel' and closed(p, target):
