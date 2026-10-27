@@ -196,9 +196,11 @@ def status(p):
     issues={r['record']['id']:r['issue'] for r in result}
     from .stock_offcut_reuse import balances as reuse_balances
     movements=reuse_balances(p,lots)
+    from .stock_offcut_returns import proof_issues
+    return_issues=proof_issues(p)
     for lot in lots:
-        balance=movements[lot['lot_key']];verified=not lot['voided'] and not issues[lot['result_id']]
-        lot.update(**balance,issue=issues[lot['result_id']],adopted_quantity=balance['remaining'] if verified else 0,verified=verified)
+        balance=movements[lot['lot_key']];issue='；'.join(v for v in (issues[lot['result_id']],return_issues.get(lot['lot_key'],'')) if v);verified=not lot['voided'] and not issue
+        lot.update(**balance,issue=issue,adopted_quantity=balance['remaining'] if verified else 0,verified=verified)
     sources=[]
     for row in p['stock_operations']:
         if row['kind']=='consume' and ops.execution(p,row['id']):
