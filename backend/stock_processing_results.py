@@ -71,6 +71,12 @@ def normalize(p, raw):
     except (ValueError, TypeError):
         raise HTTPException(422, '实际验收日期须为不晚于今天的YYYY-MM-DD') from None
     src = source(p, raw); parents = {a['allocation_index']:a for a in src['allocations']}
+    rows,total,refs=actual_rows(raw,parents)
+    return dict(consumption_id=src['id'],source_name=src['source_name'],source_revision=src['source_revision'],rows=rows,totals=total),refs
+
+
+@precise
+def actual_rows(raw,parents):
     if not isinstance(raw['rows'], list) or not 1 <= len(raw['rows']) <= 20:
         raise HTTPException(422, '每份加工结果须1至20个不同的来源分配，可分批核对')
     rows = []; refs = [raw['evidence_id']]; seen = set(); lots = set(); lot_total = 0
@@ -107,19 +113,19 @@ def normalize(p, raw):
             lots.add(identity)
             length=Fraction(number(o['length'],True))*factor; quantity=integer(o['quantity'],'实物余料根数')
             if not length < raw_length:
-                raise HTTPException(422,'每段余料须短于原材原长，未加工完整根须走完整原材退回')
+                raise HTTPException(422,'每段余料须短于原材原长，未加工完整根须走完整原材退回' if 'receipt_id' in parent else '新余料须短于来源原段，未加工原段须走余料原段退回')
             offcut_length += length*quantity; lot_total += quantity
             offcuts.append(dict(index=oi,lot_code=o['lot_code'],warehouse=o['warehouse'],length=dec(length),quantity=quantity,total_length=dec(length*quantity),mass=dec(length*quantity*weight),acceptance_basis=o['acceptance_basis']))
         actual['offcut_length']=offcut_length
         if actual['input_length'] != sum((actual[k] for k in METRICS+('offcut_length',)),Fraction(0)):
             inv.fail('实际加工长度不闭合：原材总长须精确等于成品＋锯缝＋切除＋报废＋实物余料；不按容差归零或自动补差')
         for k,v in actual.items():sums[k]+=v;mass[k.replace('_length','_mass')]+=v*weight
-        rows.append(dict(index=ri,allocation_index=r['allocation_index'],receipt_id=parent['receipt_id'],name=parent['name'],source_lot_code=parent['lot_code'],material_spec=parent['material_spec'],stock_length=parent['stock_length'],unit_weight=parent['unit_weight'],quantity=count,
+        rows.append(dict(index=ri,allocation_index=r['allocation_index'],**({'receipt_id':parent['receipt_id']} if 'receipt_id' in parent else {'parent_lot_key':parent['lot_key']}),name=parent['name'],source_lot_code=parent['lot_code'],material_spec=parent['material_spec'],stock_length=parent['stock_length'],unit_weight=parent['unit_weight'],quantity=count,
                          values={k:dec(v) for k,v in actual.items()},masses={k.replace('_length','_mass'):dec(v*weight) for k,v in actual.items()},balance_difference='0',offcuts=offcuts))
     if sum(len(r['offcuts']) for r in rows)>100 or lot_total>1000000:
         raise HTTPException(422,'每份加工结果最多100组且合计1000000段实物余料')
     total=dict(raw_count=sum(r['quantity'] for r in rows),offcut_count=lot_total,**{k:dec(v) for k,v in sums.items()},**{k:dec(v) for k,v in mass.items()},balance_difference='0',length_unit='m',mass_unit='kg')
-    return dict(consumption_id=src['id'],source_name=src['source_name'],source_revision=src['source_revision'],rows=rows,totals=total),refs
+    return rows,total,refs
 
 
 def balances(p):
@@ -147,6 +153,7 @@ def balances(p):
     stopped=set()
     for e in p['stock_events']:
         if e['operation']!='offcut_void':continue
+        if any(r['id']==e.get('result_id') for r in p['stock_offcut_processing']):continue
         lot=next((l for l in lots if l['lot_key']==e['target_id']),None)
         if not lot or e['target_id'] in stopped or e['result_id']!=lot['result_id'] or e['lot_code']!=lot['lot_code'] or e['record_hash']!=store.digest(records[lot['result_id']]):
             inv.fail('余料停用事件或原验收关联无法核验')
@@ -156,6 +163,8 @@ def balances(p):
 
 def prepare(p,raw):
     inv.records(p);computed,refs=normalize(p,raw);accounted,lots=balances(p)
+    from .stock_offcut_ledger import replay
+    lots=replay(p,lots)['lots']
     src=source(p,raw)
     for r in computed['rows']:
         used=accounted.get((src['id'],r['allocation_index']),0);limit=next(a['quantity'] for a in src['allocations'] if a['allocation_index']==r['allocation_index'])
@@ -194,12 +203,16 @@ def status(p):
         except HTTPException as e:issue=str(e.detail)
         result.append(dict(record=row,object_hash=store.digest(row),phase=phase,issue=issue))
     issues={r['record']['id']:r['issue'] for r in result}
-    from .stock_offcut_reuse import balances as reuse_balances
-    movements=reuse_balances(p,lots)
+    from .stock_offcut_ledger import replay
+    ledger=replay(p,lots);lots=ledger['lots'];movements=ledger['movements']
+    from .stock_offcut_processing import execution_issues
+    issues.update(execution_issues(p))
     from .stock_offcut_returns import proof_issues
     return_issues=proof_issues(p)
+    lot_issues={}
     for lot in lots:
-        balance=movements[lot['lot_key']];issue='；'.join(v for v in (issues[lot['result_id']],return_issues.get(lot['lot_key'],'')) if v);verified=not lot['voided'] and not issue
+        balance=movements[lot['lot_key']];issue='；'.join(v for v in (issues[lot['result_id']],return_issues.get(lot['lot_key'],''),lot_issues.get(lot.get('parent_lot_key',''),'')) if v);verified=not lot['voided'] and not issue
+        lot_issues[lot['lot_key']]=issue
         lot.update(**balance,issue=issue,adopted_quantity=balance['remaining'] if verified else 0,verified=verified)
     sources=[]
     for row in p['stock_operations']:
@@ -251,13 +264,16 @@ def void(pid:str,rid:str,ri:int,oi:int,body:dict,a=Depends(core.actor)):
         if old:
             if old.get('operation')!='offcut_void' or old.get('target_id')!=key:inv.fail('请求标识已用于其他余料操作')
             return old
-        row=core.find(p,'stock_processing_results',rid)
+        collection='stock_offcut_processing' if any(r['id']==rid for r in p['stock_offcut_processing']) else 'stock_processing_results'
+        row=core.find(p,collection,rid)
         if store.digest(row)!=body['object_hash']:inv.fail('加工验收记录已变化，请刷新核对')
-        _,lots=balances(p);lot=next((l for l in lots if l['lot_key']==key),None)
+        _,lots=balances(p)
+        from .stock_offcut_ledger import replay
+        lots=replay(p,lots)['lots'];lot=next((l for l in lots if l['lot_key']==key),None)
         if not lot:raise HTTPException(404,'已入库余料不存在')
         if lot['voided']:inv.fail('余料登记已停用')
         from .stock_offcut_reuse import balances as reuse_balances
         balance=reuse_balances(p,lots)[key]
-        if balance['reserved'] or balance['in_custody']:inv.fail('余料仍有预留或在外待加工数量，不能停用；请核查回用台账')
+        if balance['reserved'] or balance['in_custody'] or balance['processed_quantity']:inv.fail('余料仍有预留、在外或已加工原段，不能停用；请核查回用台账')
         text(body['basis'],'余料停用核查原因');stamp=inv.proofs(p,[body['evidence_id']])
         return inv.commit(c,p,a,'stock_events',body,dict(operation='offcut_void',target_id=key,result_id=rid,record_hash=store.digest(row),lot_code=lot['lot_code'],basis=body['basis'],evidence_id=body['evidence_id'],proof_stamp=stamp),'STOCK_OFFCUT_VOIDED')

@@ -13,7 +13,7 @@ COLLECTION = 'stock_offcut_reservations'
 NOTICE = ('仅本项目已验收入库且依据有效的余料，按当前已审材料表的全部定尺需求回用；每段长度和每米质量必须完全相等，材质截面及质量另据原件确认。'
           '须先以实物余料长度核定排料并独立审定，不按总长度折算、拼接或自动替换原排料。保存申请立即预留；拒绝、待补件和来源失效仍占用，须有据释放。'
           '申请含实际交接日期、领用人及原件，独立复核后显式整单领用才减少在库并增加在外待加工数量。已领用不能释放或重审；依据失效不回滚实物数量。'
-          '同材料表与完整原材预留互斥，不支持两账混配、部分领用、领后再领、再加工结果、冲销及跨项目调拨；未加工原段退回须走独立退回入口；不改变工程量、排料、报价或既有加工核对额度。')
+          '同材料表与完整原材预留互斥，不支持两账混配、部分领用、领后再领、冲销及跨项目调拨；未加工原段退回及余料实际再加工须走各自独立入口；不改变工程量、排料、报价或既有加工核对额度。')
 
 
 def closed(p, row):
@@ -36,46 +36,9 @@ def held(p, key, exclude=''):
 
 
 def balances(p, lots, *, with_issues=False):
-    """Replay issues and actual unchanged-segment returns without current proof gates."""
-    from . import stock_offcut_returns as returns
-    by_key={l['lot_key']:l for l in lots}; issued={k:0 for k in by_key}; returned={k:0 for k in by_key}
-    records={r['id']:r for r in p[COLLECTION]}; return_records={r['id']:r for r in p[returns.COLLECTION]}
-    admitted=set(); applied=set(); stopped=set(); issues={}
-    for e in p['stock_events']:
-        kind=e['operation']
-        if kind=='recover':admitted.add(e['target_id'])
-        if kind=='offcut_void':stopped.add(e['target_id'])
-        if kind not in ('offcut_issue','offcut_release','offcut_return','offcut_return_cancel'):continue
-        row=(return_records if kind.startswith('offcut_return') else records).get(e['target_id'])
-        if not row or row['id'] in applied or e.get('record_hash')!=store.digest(row):inv.fail('余料回用或退回事件、原单或历史关联无法核验')
-        applied.add(row['id'])
-        if kind in ('offcut_release','offcut_return_cancel'):continue
-        collection=returns.COLLECTION if kind=='offcut_return' else COLLECTION
-        if not inv.approved(p,collection,row) or e.get('allocations')!=row['allocations'] or e.get('totals')!=row['totals']:inv.fail('余料领用或退回事件与独立复核或分配不一致')
-        if kind=='offcut_return':
-            computed=returns.normalize(p,row['input'])
-            if any(row[k]!=v for k,v in computed.items()) or e.get('reference_id')!=row['reference_id']:inv.fail('退回原段规格、根数、总长或领用关联无法核验')
-            source=issues.get(row['reference_id'])
-            if not source:inv.fail('余料退回缺少先前已执行领用')
-            for a in row['allocations']:
-                parent=source.get(a['allocation_index'])
-                if not parent or a['quantity']>parent['quantity']-parent['returned']:inv.fail('原段退回超过对应领用分配在外余额')
-                parent['returned']+=a['quantity'];returned[a['lot_key']]+=a['quantity']
-        else:
-            normalized,totals=allocation_values(row['demand'],row['input']['allocations'],lots)
-            if normalized!=row['allocations'] or totals!=row['totals']:inv.fail('余料回用规格、数量或总长无法核验')
-            issues[row['id']]={i:dict(**a,returned=0) for i,a in enumerate(row['allocations'],1)}
-            for a in row['allocations']:
-                lot=by_key.get(a['lot_key'])
-                if not lot or lot['result_id'] not in admitted or a['lot_key'] in stopped:inv.fail('余料领用早于实际入库或晚于停用')
-                issued[a['lot_key']]+=a['quantity']
-                if issued[a['lot_key']]-returned[a['lot_key']]>lot['quantity']:inv.fail('余料领用超出实物当前在库数量')
-    result={}
-    for key,lot in by_key.items():
-        custody=issued[key]-returned[key];on_hand=lot['quantity']-custody;reserved=held(p,key)
-        if min(custody,on_hand)<0 or reserved>on_hand:inv.fail('余料在库、在外或预留台账不闭合，请核查原始台账')
-        result[key]=dict(in_stock_quantity=on_hand,in_custody=custody,issued_quantity=issued[key],returned_quantity=returned[key],reserved=reserved,remaining=on_hand-reserved)
-    return (result,issues) if with_issues else result
+    from .stock_offcut_ledger import replay
+    result=replay(p,lots)
+    return (result['movements'],result['issues']) if with_issues else result['movements']
 
 
 @precise
@@ -151,7 +114,7 @@ def status(p):
             elif not released:validate(p,row)
             issue=''
         except HTTPException as e:issue=str(e.detail)
-        rows.append(dict(record=row,object_hash=store.digest(row),active=not issued and not released,phase='issued' if issued else 'released' if released else row['state'],issue=issue,balances=[dict(**a,allocation_index=i,outstanding=a['quantity']-a['returned']) for i,a in allocations.get(row['id'],{}).items()]))
+        rows.append(dict(record=row,object_hash=store.digest(row),active=not issued and not released,phase='issued' if issued else 'released' if released else row['state'],issue=issue,balances=[dict(**a,allocation_index=i,outstanding=a['quantity']-a['returned']-a['consumed']) for i,a in allocations.get(row['id'],{}).items()]))
     return dict(reservations=rows,notice=NOTICE)
 
 
