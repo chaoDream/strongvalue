@@ -114,7 +114,7 @@ def status(p):
             elif not released:validate(p,row)
             issue=''
         except HTTPException as e:issue=str(e.detail)
-        rows.append(dict(record=row,object_hash=store.digest(row),active=not issued and not released,phase='issued' if issued else 'released' if released else row['state'],issue=issue,balances=[dict(**a,allocation_index=i,outstanding=a['quantity']-a['returned']-a['consumed']) for i,a in allocations.get(row['id'],{}).items()]))
+        rows.append(dict(record=row,object_hash=store.digest(row),active=not issued and not released,phase='issued' if issued else 'released' if released else row['state'],issue=issue,balances=[dict(**a,allocation_index=i,outstanding=a['quantity']-a['returned']-a['consumed']-a['processing']) for i,a in allocations.get(row['id'],{}).items()]))
     return dict(reservations=rows,notice=NOTICE)
 
 

@@ -8,10 +8,10 @@ from .stock_processing_results import actual_rows
 
 router=APIRouter(prefix='/api/v1')
 COLLECTION='stock_offcut_processing'
-NOTICE=('仅引用已执行余料领用单，按逐分配尚未加工且未退回的原段余额，登记本次实际加工根数、成品、锯缝、切除、报废及新余料逐项实测和原件。'
-        '原段总长须精确等于全部实际去向，不按计划生成库存或用容差补差。预览、保存和独立复核不记账，显式执行后才减少在外未加工原段、增加已加工根数并验收入库新余料。'
+NOTICE=('未单独登记投入且已有完整结果时引用已执行余料领用；已实际投入的结果须引用对应已执行投入单，按本单尚未验收余额登记本次验收原段根数、成品、锯缝、切除、报废及新余料逐项实测和原件。'
+        '原段总长须精确等于全部实际去向，不按计划生成库存或用容差补差。预览、保存和独立复核不记账，显式执行后才增加已验收加工根数并入库新余料；直接模式扣未加工余额，引用投入单时仅结转本单在加工待验收数量，不重复扣未加工余额。'
         '新余料须短于来源原段、独立编号及库位和质量验收，继承材质截面及每米质量，保留父余料与原领用关联，可再按核定定尺独立回用。'
-        '已加工原段不能再按未加工原段退回；待执行加工和退回竞争同一余额，执行时重查。上游失效不回滚历史实物记账，实际结果须当前有效实测凭据。'
+        '已投入或已加工验收原段不能再按未加工原段退回；待执行加工和退回竞争同一余额，执行时重查。上游失效不回滚历史实物记账，实际结果须当前有效实测凭据。'
         '再加工或祖先验收依据失效时保留数量、新余料待核查，禁止新增领用。已执行结果不可取消、改数或重审；未执行可有据取消。不改变工程净量、排料、报价、完整原材或最初加工核对额度，不支持冲销、盘点调整、自动替换排料及跨项目调拨。')
 
 
@@ -25,6 +25,7 @@ def reviewable(p,row,actor):
 
 def normalize(p,raw):
     fields={'reference_id','reference_hash','business_date','inspector','basis','evidence_id','confirmed','rows'}
+    if isinstance(raw,dict) and ('job_id' in raw or 'job_hash' in raw):fields|={'job_id','job_hash'}
     if not isinstance(raw,dict) or set(raw)!=fields:raise HTTPException(422,'须完整填写已执行余料领用、实际日期、验收人、实测偏差说明、原件、确认及逐项加工去向')
     for k in ('reference_id','reference_hash','inspector','basis','evidence_id'):text(raw[k],'实际再加工范围及偏差说明' if k=='basis' else '再加工来源、验收人或原件',2000 if k=='basis' else 200)
     if raw['confirmed'] is not True:raise HTTPException(422,'须据实测及原件确认实际再加工和新余料质量，不以计划替代实物')
@@ -36,9 +37,15 @@ def normalize(p,raw):
     if not inv.event_for(p,'offcut_issue',source['id']):inv.fail('实际再加工须引用本项目已执行的余料领用单')
     if store.digest(source)!=raw['reference_hash']:inv.fail('来源余料领用快照已变化，请刷新核对')
     if raw['business_date']<source['input']['business_date']:inv.fail('再加工实际日期不得早于来源余料领用交接日期')
-    parents={i:a for i,a in enumerate(source['allocations'],1)}
+    job=None
+    if 'job_id' in raw:
+        text(raw['job_id'],'已投入加工单',200);text(raw['job_hash'],'已投入快照',200)
+        job=core.find(p,'stock_offcut_jobs',raw['job_id'])
+        if not inv.event_for(p,'offcut_start',job['id']) or job['reference_id']!=source['id'] or store.digest(job)!=raw['job_hash']:inv.fail('结果须引用本领用单已执行的实际投入单及当前冻结快照')
+        if raw['business_date']<job['input']['business_date']:inv.fail('结果实际验收日期不得早于本单实际投入日期')
+    parents={a['allocation_index']:a for a in job['allocations']} if job else {i:a for i,a in enumerate(source['allocations'],1)}
     rows,totals,refs=actual_rows(raw,parents)
-    return dict(reference_id=source['id'],source_name=source['demand']['source_name'],source_revision=source['demand']['source_revision'],rows=rows,totals=totals),refs
+    return dict(**({'job_id':job['id'],'job_hash':store.digest(job)} if job else {}),reference_id=source['id'],source_name=source['demand']['source_name'],source_revision=source['demand']['source_revision'],rows=rows,totals=totals),refs
 
 
 def child_lots(row,actual):
@@ -55,7 +62,10 @@ def prepare(p,raw):
     existing={(l['warehouse'].strip(),l['lot_code'].strip()) for l in ledger['lots']}|{(r['input']['warehouse'].strip(),r['input']['lot_code'].strip()) for r in p['stock_receipts']}
     for r in computed['rows']:
         parent=source[r['allocation_index']]
-        if r['quantity']>parent['quantity']-parent['returned']-parent['consumed']:inv.fail('本次再加工超过对应领用分配尚未加工且未退回余额')
+        if computed.get('job_id'):
+            job=ledger['jobs'].get(computed['job_id'],{}).get(r['allocation_index'])
+            if not job or r['quantity']>job['quantity']-job['accounted']:inv.fail('本次结果超过本投入单已投入且尚未验收余额')
+        elif r['quantity']>parent['quantity']-parent['returned']-parent['consumed']-parent['processing']:inv.fail('本次再加工超过对应领用分配尚未加工且未退回余额')
         for o in r['offcuts']:
             if (o['warehouse'].strip(),o['lot_code'].strip()) in existing:inv.fail('新余料编号已被完整原材或其他代余料使用，停用后也不能复用')
     return computed,inv.proofs(p,refs)
@@ -78,7 +88,10 @@ def execution_issues(p):
         try:
             _,refs=normalize(p,row['input'])
             if inv.proofs(p,refs)!=row['proof_stamp']:inv.fail('再加工实测验收原件已变化')
-            issue=''
+            if row.get('job_id'):
+                from .stock_offcut_jobs import proof_issue
+                issue=proof_issue(p,core.find(p,'stock_offcut_jobs',row['job_id']))
+            else:issue=''
         except HTTPException as e:issue='再加工验收依据待核查，已加工和新余料数量保留：'+str(e.detail)
         issues[row['id']]=issue
     return issues

@@ -274,6 +274,6 @@ def void(pid:str,rid:str,ri:int,oi:int,body:dict,a=Depends(core.actor)):
         if lot['voided']:inv.fail('余料登记已停用')
         from .stock_offcut_reuse import balances as reuse_balances
         balance=reuse_balances(p,lots)[key]
-        if balance['reserved'] or balance['in_custody'] or balance['processed_quantity']:inv.fail('余料仍有预留、在外或已加工原段，不能停用；请核查回用台账')
+        if balance['reserved'] or balance['in_custody'] or balance['processed_quantity'] or balance['processing_quantity']:inv.fail('余料仍有预留、在外或已加工原段，不能停用；请核查回用台账')
         text(body['basis'],'余料停用核查原因');stamp=inv.proofs(p,[body['evidence_id']])
         return inv.commit(c,p,a,'stock_events',body,dict(operation='offcut_void',target_id=key,result_id=rid,record_hash=store.digest(row),lot_code=lot['lot_code'],basis=body['basis'],evidence_id=body['evidence_id'],proof_stamp=stamp),'STOCK_OFFCUT_VOIDED')

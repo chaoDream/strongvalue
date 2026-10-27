@@ -60,7 +60,7 @@ def prepare(p,raw):
     if not source:inv.fail('来源余料领用执行关联无效')
     for a in result['allocations']:
         parent=source[a['allocation_index']]
-        if a['quantity']>parent['quantity']-parent['returned']-parent['consumed']:inv.fail('退回超过该领用分配尚在外的原段余额，请刷新核对')
+        if a['quantity']>parent['quantity']-parent['returned']-parent['consumed']-parent['processing']:inv.fail('退回超过该领用分配尚在外的原段余额，请刷新核对')
     return result,inv.proofs(p,[raw['evidence_id']])
 
 
