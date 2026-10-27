@@ -13,7 +13,7 @@ from .surface_takeoff import check_sources
 from . import railing_material as material
 
 router = APIRouter(prefix='/api/v1')
-COLLECTIONS = ('stock_receipts', 'stock_reservations', 'stock_events', 'stock_operations', 'stock_processing_results', 'stock_offcut_reservations', 'stock_offcut_returns', 'stock_offcut_processing', 'stock_offcut_jobs', 'stock_offcut_counts', 'stock_counts')
+COLLECTIONS = ('stock_receipts', 'stock_reservations', 'stock_events', 'stock_operations', 'stock_processing_results', 'stock_offcut_reservations', 'stock_offcut_returns', 'stock_offcut_processing', 'stock_offcut_jobs', 'stock_offcut_counts', 'stock_counts', 'stock_offcut_issues')
 NOTICE = ('仅本项目完整原材按批登记和预留，数量单位为根。已审登记且原件有效才可新增预留；预留提交即占用，独立复核后标明已审。'
           '被拒、待补件或来源失效的预留继续占用，必须有据显式释放；不会自动退库。库存长度及每米质量须与所选已审排料相等，材质截面兼容性须另有原件确认，不能仅凭名称或每米质量认定。'
           '一次预留完整覆盖一个材料表当前排料需求，可分配多个批次；同材料表只能有一份未释放预留，未领料时修订须先核查并释放旧预留；已领料材料表不能二次预留。'
@@ -209,7 +209,8 @@ def status(p):
     from .stock_offcut_jobs import status as job_status
     from .stock_offcut_counts import status as count_status
     from .stock_counts import status as stock_count_status
-    return dict(stock_counts=stock_count_status(p), offcut_counts=count_status(p), offcut_jobs=job_status(p), offcut_processing=offcut_processing_status(p), offcut_returns=return_status(p), offcut_reuse=reuse_status(p), processing=processing_status(p), receipts=receipts, reservations=reservations, events=p['stock_events'], operations=operation_status(p), operation_notice=OPERATION_NOTICE, ledger_hash=ledger_hash(p), notice=NOTICE)
+    from .stock_offcut_issues import status as offcut_issue_status
+    return dict(offcut_issues=offcut_issue_status(p), stock_counts=stock_count_status(p), offcut_counts=count_status(p), offcut_jobs=job_status(p), offcut_processing=offcut_processing_status(p), offcut_returns=return_status(p), offcut_reuse=reuse_status(p), processing=processing_status(p), receipts=receipts, reservations=reservations, events=p['stock_events'], operations=operation_status(p), operation_notice=OPERATION_NOTICE, ledger_hash=ledger_hash(p), notice=NOTICE)
 
 
 def fields(body, expected):

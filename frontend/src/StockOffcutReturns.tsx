@@ -1,3 +1,4 @@
+import {issuedOffcutSources} from './StockOffcutIssues';
 import React,{useEffect,useRef,useState} from 'react';
 type Obj=Record<string,any>;
 const states:Obj={draft:'待独立复核',approved:'已审待执行',rejected:'已拒绝（未记账）',needs_info:'待补件（未记账）',executed:'已执行退回',cancelled:'已取消'};
@@ -5,7 +6,7 @@ function F({label,children}:any){return <label className="field"><span>{label}</
 export function OffcutReturnDetails({item,sourceLink}:any){return <div><p>来源余料领用：{item.source_name} V{item.source_revision}</p><p>原领用单号：{item.reference_id}</p><p>实际退回日期：{item.input.business_date}；实际接收人：{item.input.custodian}</p><p>{item.input.basis} {sourceLink(item.input.evidence_id)}</p>{item.allocations.map((a:Obj)=><p key={a.allocation_index}>原领用分配{a.allocation_index} · {a.name} → 原编号{a.lot_code}／原库位{a.warehouse} · {a.material_spec} · 原段{a.stock_length}m · {a.unit_weight}kg/m · 本次{a.quantity}根／{a.total_length}m／{a.mass}kg</p>)}<p>合计{item.totals.quantity}根／{item.totals.length}m／{item.totals.mass}kg。确认未加工、保持原长、同材质截面且质量合格；保存和复核不增库存，显式执行后才记账。</p></div>}
 export default function StockOffcutReturns({p,user,view,request,onChanged,onReview,sourceLink}:any){
  const data=view.offcut_returns,base='/projects/'+p.id+'/stock-inventory/offcut-returns',editable=user.role!=='reviewer';
- const sources=(view.offcut_reuse?.reservations||[]).filter((r:Obj)=>r.phase==='issued');
+ const sources=issuedOffcutSources(view);
  const [form,setForm]=useState<Obj|null>(null),[preview,setPreview]=useState<Obj|null>(null),[working,setWorking]=useState(false),[error,setError]=useState('');const epoch=useRef(0);
  useEffect(()=>{epoch.current++;setForm(null);setPreview(null);setError('');return()=>{epoch.current++}},[p.id]);
  function close(){if(working)return;epoch.current++;setForm(null);setPreview(null);setError('')}

@@ -12,16 +12,55 @@ router = APIRouter(prefix='/api/v1')
 COLLECTION = 'stock_offcut_reservations'
 NOTICE = ('仅本项目已验收入库且依据有效的余料，按当前已审材料表的全部定尺需求回用；每段长度和每米质量必须完全相等，材质截面及质量另据原件确认。'
           '须先以实物余料长度核定排料并独立审定，不按总长度折算、拼接或自动替换原排料。保存申请立即预留；拒绝、待补件和来源失效仍占用，须有据释放。'
-          '申请含实际交接日期、领用人及原件，独立复核后显式整单领用才减少在库并增加在外待加工数量。已领用不能释放或重审；依据失效不回滚实物数量。'
-          '同材料表与完整原材预留互斥，不支持两账混配、部分领用、领后再领、冲销及跨项目调拨；未加工原段退回及余料实际再加工须走各自独立入口；不改变工程量、排料、报价或既有加工核对额度。')
+          '申请含实际交接日期、领用人及原件，独立复核后可首次整单或按独立批单分批领用；本次执行才减少在库和未领占用并增加对应批单在外数量。首次领出后原预留不能重审或整单释放，未领继续占用，可有据释放未领余量；依据失效不回滚实物数量。'
+          '同材料表与完整原材预留互斥，不支持两账混配、同材料表另行预留再领、冲销及跨项目调拨；未加工原段退回及余料实际再加工须走各自独立入口；不改变工程量、排料、报价或既有加工核对额度。')
 
 
-def closed(p, row):
-    return inv.event_for(p, 'offcut_issue', row['id']) or inv.event_for(p, 'offcut_release', row['id'])
+def issued(p,rid):
+    return inv.event_for(p,'offcut_issue',rid) or next((e for e in p['stock_events'] if e['operation']=='offcut_partial_issue' and e.get('reservation_id')==rid),None)
 
 
-def active(p, row):
-    return not closed(p, row)
+def released(p,rid):return inv.event_for(p,'offcut_release',rid) or inv.event_for(p,'offcut_release_remaining',rid)
+
+
+def closed(p,row):return issued(p,row['id']) or released(p,row['id'])
+
+
+def progress(p,row):
+    taken={i:0 for i in range(1,len(row['allocations'])+1)}
+    for e in p['stock_events']:
+        if e['operation']=='offcut_issue' and e['target_id']==row['id']:
+            for i,a in enumerate(e['allocations'],1):taken[i]+=a['quantity']
+        elif e['operation']=='offcut_partial_issue' and e.get('reservation_id')==row['id']:
+            for a in e['allocations']:
+                if a['allocation_index'] not in taken:inv.fail('余料批单缺少原预留分配关联')
+                taken[a['allocation_index']]+=a['quantity']
+    result=[dict(**a,allocation_index=i,issued=taken[i],remaining=a['quantity']-taken[i]) for i,a in enumerate(row['allocations'],1)]
+    if any(a['remaining']<0 for a in result):inv.fail('余料累计领出超出原预留逐项数量')
+    return result
+
+
+def active(p,row):return not released(p,row['id']) and any(a['remaining'] for a in progress(p,row))
+
+
+def issue_source(p,rid):
+    row=next((r for r in p[COLLECTION] if r['id']==rid),None)
+    if row:
+        if not inv.event_for(p,'offcut_issue',rid):inv.fail('须引用已执行余料领用批次，部分领用的原预留不是已领批单')
+        return row
+    row=core.find(p,'stock_offcut_issues',rid)
+    if not inv.event_for(p,'offcut_partial_issue',rid):inv.fail('须引用本项目已执行余料分批领用单')
+    return row
+
+
+def batch_proof_issue(p,rid):
+    row=next((r for r in p['stock_offcut_issues'] if r['id']==rid),None)
+    if not row:return ''
+    from .stock_offcut_issues import proof_issue
+    return proof_issue(p,row)
+
+
+def issue_allocations(row):return {a.get('allocation_index',i):a for i,a in enumerate(row['allocations'],1)}
 
 
 def source_free(p, cid, exclude=''):
@@ -32,7 +71,7 @@ def source_free(p, cid, exclude=''):
 
 
 def held(p, key, exclude=''):
-    return sum(a['quantity'] for r in p[COLLECTION] if r['id']!=exclude and active(p,r) for a in r['allocations'] if a['lot_key']==key)
+    return sum(a['remaining'] for r in p[COLLECTION] if r['id']!=exclude and not released(p,r['id']) for a in progress(p,r) if a['lot_key']==key)
 
 
 def balances(p, lots, *, with_issues=False):
@@ -63,7 +102,7 @@ def allocation_values(demand, allocations, lots):
     return rows,dict(quantity=sum(a['quantity'] for a in rows),length=dec(length),mass=dec(mass),length_unit='m',mass_unit='kg')
 
 
-def prepare(p, raw, exclude=''):
+def prepare(p, raw, exclude='',remaining=False):
     fields={'source_id','demand_hash','allocations','basis','evidence_id','confirmed','custodian','business_date'}
     if not isinstance(raw,dict) or set(raw)!=fields:raise HTTPException(422,'须填写排料来源、全部余料分配、实物兼容及交接说明、领用人、实际日期、原件及确认')
     for k in ('source_id','demand_hash','basis','evidence_id','custodian'):text(raw[k],'回用兼容及实际交接说明' if k=='basis' else '回用来源、领用人或原件',2000 if k=='basis' else 200)
@@ -77,7 +116,10 @@ def prepare(p, raw, exclude=''):
     from .stock_processing_results import status as processing_status
     lots=processing_status(p)['lots']; rows,totals=allocation_values(demand,raw['allocations'],lots)
     used={}
-    for a in rows:used[a['lot_key']]=used.get(a['lot_key'],0)+a['quantity']
+    amounts=progress(p,core.find(p,COLLECTION,exclude)) if remaining else rows
+    for a in amounts:
+        count=a['remaining'] if remaining else a['quantity']
+        if count:used[a['lot_key']]=used.get(a['lot_key'],0)+count
     for key,count in used.items():
         lot=next(l for l in lots if l['lot_key']==key)
         if not lot['verified']:inv.fail('余料已停用或验收原件失效，不能新增回用或执行领用')
@@ -88,10 +130,10 @@ def prepare(p, raw, exclude=''):
 def preview_hash(raw, result, stamp):return store.digest(dict(input=raw,result=result,proof_stamp=stamp))
 
 
-def validate(p,row):
+def validate(p,row,allow_partial=False):
     inv.records(p)
-    if closed(p,row):inv.fail('余料回用已领用或释放，仅供追溯')
-    result,stamp=prepare(p,row['input'],row['id'])
+    if (closed(p,row) and not allow_partial) or released(p,row['id']) or not active(p,row):inv.fail('余料回用已领用或释放，不能继续领用或重审')
+    result,stamp=prepare(p,row['input'],row['id'],remaining=allow_partial)
     if any(row[k]!=v for k,v in result.items()) or row['proof_stamp']!=stamp or row['preview_hash']!=preview_hash(row['input'],result,stamp):
         inv.fail('余料回用来源、原件或预览已变化，请有据释放后重新核定')
 
@@ -106,15 +148,15 @@ def status(p):
     _,lots=processing_balances(p);_,allocations=balances(p,lots,with_issues=True)
     rows=[]
     for row in p[COLLECTION]:
-        issued=inv.event_for(p,'offcut_issue',row['id']);released=inv.event_for(p,'offcut_release',row['id'])
+        did_issue=issued(p,row['id']);did_release=released(p,row['id']);details=progress(p,row);sent=sum(a['issued'] for a in details);left=sum(a['remaining'] for a in details)
         try:
-            if issued:
+            if did_issue:
                 if inv.proofs(p,[row['input']['evidence_id']])!=row['proof_stamp']:inv.fail('历史回用交接原件已变化，已领用数量保留待核查')
                 if inv.demands(p,row['source_id'])!=row['demand']:inv.fail('历史回用排料来源已变化，已领用数量保留待核查')
-            elif not released:validate(p,row)
+            elif not did_release:validate(p,row)
             issue=''
         except HTTPException as e:issue=str(e.detail)
-        rows.append(dict(record=row,object_hash=store.digest(row),active=not issued and not released,phase='issued' if issued else 'released' if released else row['state'],issue=issue,balances=[dict(**a,allocation_index=i,outstanding=a['quantity']-a['returned']-a['consumed']-a['processing']) for i,a in allocations.get(row['id'],{}).items()]))
+        rows.append(dict(record=row,object_hash=store.digest(row),active=not did_release and left>0,phase='remaining_released' if did_release and did_issue else 'partially_issued' if did_issue and left else 'issued' if did_issue else 'released' if did_release else row['state'],progress=details,issued_quantity=sent,unissued_quantity=left,held_quantity=0 if did_release else left,issue=issue,balances=[dict(**a,allocation_index=i,outstanding=a['quantity']-a['returned']-a['consumed']-a['processing']) for i,a in allocations.get(row['id'],{}).items()]))
     return dict(reservations=rows,notice=NOTICE)
 
 
@@ -142,9 +184,9 @@ def submit(pid:str,body:dict,a=Depends(core.actor)):
 @router.post('/projects/{pid}/stock-inventory/offcut-reuse/{rid}/{operation}')
 def movement(pid:str,rid:str,operation:str,body:dict,a=Depends(core.actor)):
     core.edit(a)
-    if operation not in ('execute','release'):raise HTTPException(422,'仅支持执行整单余料领用或释放未领用申请')
+    if operation not in ('execute','release','release-remaining'):raise HTTPException(422,'仅支持执行整单余料领用或释放未领用申请')
     inv.fields(body,{'object_hash'} if operation=='execute' else {'object_hash','basis','evidence_id'})
-    kind='offcut_issue' if operation=='execute' else 'offcut_release'
+    kind='offcut_issue' if operation=='execute' else 'offcut_release_remaining' if operation=='release-remaining' else 'offcut_release'
     with store.transaction() as c:
         p=core.project(c,pid,a);old=inv.begin(p,body)
         if old:
@@ -152,11 +194,19 @@ def movement(pid:str,rid:str,operation:str,body:dict,a=Depends(core.actor)):
             return old
         row=core.find(p,COLLECTION,rid)
         if body['object_hash']!=store.digest(row):inv.fail('余料回用申请已变化，请刷新核对')
-        if closed(p,row):inv.fail('余料回用已领用或释放，不能再次执行或退回库存')
+        if operation!='release-remaining' and closed(p,row):inv.fail('余料回用已领用或释放，不能再次整单执行或释放')
+        if operation=='release-remaining':
+            from .stock_processing_results import balances as raw_balances
+            _,lots=raw_balances(p);balances(p,lots)
+            if released(p,rid) or not issued(p,rid) or not active(p,row):inv.fail('仅可释放已部分领用且尚未关闭的未领余量')
         data=dict(operation=kind,target_id=rid,record_hash=store.digest(row))
         if operation=='execute':
             if not inv.approved(p,COLLECTION,row):inv.fail('须有效独立复核后才能执行余料领用')
             validate(p,row);data.update(allocations=row['allocations'],totals=row['totals'])
         else:
+            if operation=='release-remaining':
+                from .stock_offcut_issues import selection_values
+                selected=[dict(allocation_index=a['allocation_index'],quantity=a['remaining']) for a in progress(p,row) if a['remaining']]
+                allocations,totals=selection_values(row,selected);data.update(allocations=allocations,totals=totals)
             text(body['basis'],'余料释放核查原因');data.update(basis=body['basis'],evidence_id=body['evidence_id'],proof_stamp=inv.proofs(p,[body['evidence_id']]))
         return inv.commit(c,p,a,'stock_events',body,data,'STOCK_'+kind.upper())

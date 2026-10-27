@@ -33,8 +33,7 @@ def normalize(p,raw):
         d=date.fromisoformat(raw['business_date'])
         if d.isoformat()!=raw['business_date'] or d>datetime.now(ZoneInfo('Asia/Shanghai')).date():raise ValueError()
     except (TypeError,ValueError):raise HTTPException(422,'实际再加工日期须为不晚于今天的YYYY-MM-DD') from None
-    source=core.find(p,reuse.COLLECTION,raw['reference_id'])
-    if not inv.event_for(p,'offcut_issue',source['id']):inv.fail('实际再加工须引用本项目已执行的余料领用单')
+    source=reuse.issue_source(p,raw['reference_id'])
     if store.digest(source)!=raw['reference_hash']:inv.fail('来源余料领用快照已变化，请刷新核对')
     if raw['business_date']<source['input']['business_date']:inv.fail('再加工实际日期不得早于来源余料领用交接日期')
     job=None
@@ -43,7 +42,7 @@ def normalize(p,raw):
         job=core.find(p,'stock_offcut_jobs',raw['job_id'])
         if not inv.event_for(p,'offcut_start',job['id']) or job['reference_id']!=source['id'] or store.digest(job)!=raw['job_hash']:inv.fail('结果须引用本领用单已执行的实际投入单及当前冻结快照')
         if raw['business_date']<job['input']['business_date']:inv.fail('结果实际验收日期不得早于本单实际投入日期')
-    parents={a['allocation_index']:a for a in job['allocations']} if job else {i:a for i,a in enumerate(source['allocations'],1)}
+    parents={a['allocation_index']:a for a in job['allocations']} if job else reuse.issue_allocations(source)
     rows,totals,refs=actual_rows(raw,parents)
     return dict(**({'job_id':job['id'],'job_hash':store.digest(job)} if job else {}),reference_id=source['id'],source_name=source['demand']['source_name'],source_revision=source['demand']['source_revision'],rows=rows,totals=totals),refs
 
@@ -92,6 +91,7 @@ def execution_issues(p):
                 from .stock_offcut_jobs import proof_issue
                 issue=proof_issue(p,core.find(p,'stock_offcut_jobs',row['job_id']))
             else:issue=''
+            issue='；'.join(dict.fromkeys(v for v in (issue,reuse.batch_proof_issue(p,row['reference_id'])) if v))
         except HTTPException as e:issue='再加工验收依据待核查，已加工和新余料数量保留：'+str(e.detail)
         issues[row['id']]=issue
     return issues

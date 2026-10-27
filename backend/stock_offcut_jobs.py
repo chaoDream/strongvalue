@@ -32,16 +32,15 @@ def normalize(p,raw):
         d=date.fromisoformat(raw['business_date'])
         if d.isoformat()!=raw['business_date'] or d>datetime.now(ZoneInfo('Asia/Shanghai')).date():raise ValueError()
     except (TypeError,ValueError):raise HTTPException(422,'实际投入日期须为不晚于今天的YYYY-MM-DD') from None
-    source=core.find(p,reuse.COLLECTION,raw['reference_id'])
-    if not inv.event_for(p,'offcut_issue',source['id']):inv.fail('投入加工须引用本项目已执行的余料领用单')
+    source=reuse.issue_source(p,raw['reference_id'])
     if store.digest(source)!=raw['reference_hash']:inv.fail('余料领用快照已变化，请刷新核对')
     if raw['business_date']<source['input']['business_date']:inv.fail('实际投入日期不得早于余料领用交接日期')
     selections=raw['selections']
     if not isinstance(selections,list) or not 1<=len(selections)<=100:raise HTTPException(422,'每单须1至100条不同来源分配和正整数投入根数')
     rows=[];seen=set()
     for a in selections:
-        if not isinstance(a,dict) or set(a)!={'allocation_index','quantity'} or type(a['allocation_index']) is not int or not 1<=a['allocation_index']<=len(source['allocations']) or a['allocation_index'] in seen or type(a['quantity']) is not int or not 1<=a['quantity']<=1000000:raise HTTPException(422,'投入须选择不同的本单分配序号，根数为1至1000000正整数')
-        seen.add(a['allocation_index']);parent=source['allocations'][a['allocation_index']-1]
+        if not isinstance(a,dict) or set(a)!={'allocation_index','quantity'} or type(a['allocation_index']) is not int or a['allocation_index'] not in reuse.issue_allocations(source) or a['allocation_index'] in seen or type(a['quantity']) is not int or not 1<=a['quantity']<=1000000:raise HTTPException(422,'投入须选择不同的本单分配序号，根数为1至1000000正整数')
+        seen.add(a['allocation_index']);parent=reuse.issue_allocations(source)[a['allocation_index']]
         if a['quantity']>parent['quantity']:inv.fail('实际投入超过原领用分配根数')
         item={**parent,**a};measure=totals([item]);item.update(total_length=measure['length'],mass=measure['mass']);rows.append(item)
     return dict(reference_id=source['id'],source_name=source['demand']['source_name'],source_revision=source['demand']['source_revision'],allocations=rows,totals=totals(rows))
@@ -72,7 +71,7 @@ def validate(p,row):
 def proof_issue(p,row):
     try:
         if inv.proofs(p,[row['input']['evidence_id']])!=row['proof_stamp']:inv.fail('投入加工原件已变化')
-        return ''
+        return reuse.batch_proof_issue(p,row['reference_id'])
     except HTTPException as e:return '实际投入依据待核查，在加工及已验收数量保留：'+str(e.detail)
 
 

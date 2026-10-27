@@ -3,12 +3,12 @@ from . import store, stock_inventory as inv
 
 
 def replay(p,base_lots):
-    from . import stock_offcut_reuse as reuse, stock_offcut_returns as returns, stock_offcut_processing as processing, stock_offcut_jobs as job_module, stock_offcut_counts as counts
+    from . import stock_offcut_reuse as reuse, stock_offcut_returns as returns, stock_offcut_processing as processing, stock_offcut_jobs as job_module, stock_offcut_counts as counts, stock_offcut_issues as issue_module
     lots=[dict(l) for l in base_lots if l.get('origin')!='offcut_processing'];by_key={l['lot_key']:l for l in lots}
     movements={k:dict(issued_quantity=0,returned_quantity=0,processed_quantity=0,processing_quantity=0,adjustment_gain=0,adjustment_loss=0,count_revision=0) for k in by_key}
-    records={r['id']:r for name in (reuse.COLLECTION,returns.COLLECTION,processing.COLLECTION,job_module.COLLECTION,counts.COLLECTION) for r in p[name]}
+    records={r['id']:r for name in (reuse.COLLECTION,returns.COLLECTION,processing.COLLECTION,job_module.COLLECTION,counts.COLLECTION,issue_module.COLLECTION) for r in p[name]}
     all_results={r['id']:r for name in ('stock_processing_results',processing.COLLECTION) for r in p[name]}
-    used=set();active=set();applied=set();stopped=set();issues={};jobs={}
+    used=set();active=set();applied=set();stopped=set();issues={};jobs={};taken={};released=set()
     receipt_ids={(r['input']['warehouse'].strip(),r['input']['lot_code'].strip()) for r in p['stock_receipts']}
 
     def admit(lot):
@@ -27,12 +27,23 @@ def replay(p,base_lots):
             m=movements[lot['lot_key']]
             if m['issued_quantity']-m['returned_quantity'] or m['processed_quantity']:inv.fail('余料停用仍有在外或已加工原段，不能伪造停用顺序')
             stopped.add(lot['lot_key'])
-        if kind not in ('offcut_issue','offcut_release','offcut_return','offcut_return_cancel','offcut_process','offcut_process_cancel','offcut_start','offcut_start_cancel','offcut_count','offcut_count_cancel'):continue
+        if kind not in ('offcut_issue','offcut_release','offcut_return','offcut_return_cancel','offcut_process','offcut_process_cancel','offcut_start','offcut_start_cancel','offcut_count','offcut_count_cancel','offcut_partial_issue','offcut_partial_cancel','offcut_release_remaining'):continue
         row=records.get(e['target_id'])
-        expected_collection=counts.COLLECTION if kind.startswith('offcut_count') else job_module.COLLECTION if kind.startswith('offcut_start') else processing.COLLECTION if kind.startswith('offcut_process') else returns.COLLECTION if kind.startswith('offcut_return') else reuse.COLLECTION
+        expected_collection=issue_module.COLLECTION if kind.startswith('offcut_partial') else counts.COLLECTION if kind.startswith('offcut_count') else job_module.COLLECTION if kind.startswith('offcut_start') else processing.COLLECTION if kind.startswith('offcut_process') else returns.COLLECTION if kind.startswith('offcut_return') else reuse.COLLECTION
         if not row or not any(r['id']==row['id'] for r in p[expected_collection]) or row['id'] in applied or e.get('record_hash')!=store.digest(row):inv.fail('余料事件、原单类型或历史关联无法核验')
         applied.add(row['id'])
-        if kind in ('offcut_release','offcut_return_cancel','offcut_process_cancel','offcut_start_cancel','offcut_count_cancel'):continue
+        if kind in ('offcut_release','offcut_release_remaining'):
+            prior=taken.get(row['id'],{})
+            if row['id'] in released:inv.fail('余料预留重复释放')
+            if kind=='offcut_release':
+                if any(prior.values()):inv.fail('已有分批领用不能整单释放')
+            else:
+                selections=[dict(allocation_index=i,quantity=a['quantity']-prior.get(i,0)) for i,a in enumerate(row['allocations'],1) if a['quantity']>prior.get(i,0)]
+                if not any(prior.values()) or not selections:inv.fail('未领余量释放缺少先前分批领用或尚未领余额')
+                values,total=issue_module.selection_values(row,selections)
+                if e.get('allocations')!=values or e.get('totals')!=total:inv.fail('余料未领余量释放分配或数量无法核验')
+            released.add(row['id']);continue
+        if kind in ('offcut_partial_cancel','offcut_return_cancel','offcut_process_cancel','offcut_start_cancel','offcut_count_cancel'):continue
         if not inv.approved(p,expected_collection,row):inv.fail('余料已执行单据缺少匹配的独立复核')
         if kind=='offcut_count':
             lot=by_key.get(row.get('lot_key'))
@@ -77,9 +88,22 @@ def replay(p,base_lots):
                 if not parent or a['quantity']>parent['quantity']-parent['returned']-parent['consumed']-parent['processing']:inv.fail('退回超出对应领用分配尚未加工且未退回余额')
                 parent['returned']+=a['quantity'];movements[a['lot_key']]['returned_quantity']+=a['quantity']
         else:
-            allocations,totals=reuse.allocation_values(row['demand'],row['input']['allocations'],lots)
-            if allocations!=row['allocations'] or totals!=row['totals'] or e.get('allocations')!=row['allocations'] or e.get('totals')!=row['totals']:inv.fail('余料领用规格、数量或总长无法核验')
-            issues[row['id']]={i:dict(**a,returned=0,consumed=0,processing=0) for i,a in enumerate(allocations,1)}
+            if kind=='offcut_partial_issue':
+                computed=issue_module.normalize(p,row['input']);reservation=next((r for r in p[reuse.COLLECTION] if r['id']==row['reservation_id']),None)
+                if not reservation or not inv.approved(p,reuse.COLLECTION,reservation) or any(row[k]!=v for k,v in computed.items()) or e.get('reservation_id')!=reservation['id']:inv.fail('余料分批来源预留、审核或冻结分配无法核验')
+                original,_=reuse.allocation_values(reservation['demand'],reservation['input']['allocations'],lots)
+                if original!=reservation['allocations']:inv.fail('原余料预留冻结分配与实际规格不符')
+                allocations,totals=row['allocations'],row['totals'];indexed=reuse.issue_allocations(row)
+            else:
+                reservation=row;allocations,totals=reuse.allocation_values(row['demand'],row['input']['allocations'],lots)
+                if allocations!=row['allocations'] or totals!=row['totals'] or any(taken.get(row['id'],{}).values()):inv.fail('整单余料领用重复或覆盖既有分批')
+                indexed={i:a for i,a in enumerate(allocations,1)}
+            if reservation['id'] in released or e.get('allocations')!=allocations or e.get('totals')!=totals:inv.fail('余料领用晚于释放或冻结数量不符')
+            before=taken.setdefault(reservation['id'],{})
+            for i,a in indexed.items():
+                before[i]=before.get(i,0)+a['quantity']
+                if before[i]>reservation['allocations'][i-1]['quantity']:inv.fail('余料累计领用超出原预留逐项根数')
+            issues[row['id']]={i:dict(**a,returned=0,consumed=0,processing=0) for i,a in indexed.items()}
             for a in allocations:
                 if a['lot_key'] not in active or a['lot_key'] in stopped:inv.fail('余料领用早于实际入库或晚于停用')
                 m=movements[a['lot_key']];m['issued_quantity']+=a['quantity']

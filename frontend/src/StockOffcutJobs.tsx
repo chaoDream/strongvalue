@@ -1,3 +1,4 @@
+import {issuedOffcutSources} from './StockOffcutIssues';
 import React,{useEffect,useRef,useState} from 'react';
 type Obj=Record<string,any>;
 const states:Obj={draft:'待独立复核',approved:'已审待执行',rejected:'已拒绝（未记账）',needs_info:'待补件（未记账）',cancelled:'已取消'};
@@ -5,7 +6,7 @@ const progress:Obj={pending:'在加工待验收',partial:'已部分验收',compl
 function F({label,children}:any){return <label className="field"><span>{label}</span>{children}</label>}
 export function OffcutJobDetails({item,sourceLink}:any){return <div><p>来源领用：{item.source_name} V{item.source_revision} · 原领用单{item.reference_id}</p><p>实际投入日期：{item.input.business_date}；加工地点：{item.input.workshop}；接收人／班组：{item.input.custodian}</p><p>{item.input.basis} {sourceLink(item.input.evidence_id)}</p>{item.allocations.map((a:Obj)=><p key={a.allocation_index}>分配{a.allocation_index} · {a.name} · {a.lot_code}／{a.warehouse} · {a.material_spec} · {a.stock_length}m／{a.unit_weight}kg/m · 实际投入{a.quantity}根／{a.total_length}m／{a.mass}kg</p>)}<p>合计{item.totals.quantity}根／{item.totals.length}m／{item.totals.mass}kg。保存和复核不记账；显式执行后才转为在加工待验收，不自动登记成品、损耗或新余料，不能再按未加工原段退回。</p></div>}
 export default function StockOffcutJobs({p,user,view,request,onChanged,onReview,sourceLink}:any){
- const data=view.offcut_jobs,base='/projects/'+p.id+'/stock-inventory/offcut-jobs',editable=user.role!=='reviewer';const sources=(view.offcut_reuse?.reservations||[]).filter((r:Obj)=>r.phase==='issued');
+ const data=view.offcut_jobs,base='/projects/'+p.id+'/stock-inventory/offcut-jobs',editable=user.role!=='reviewer';const sources=issuedOffcutSources(view);
  const [form,setForm]=useState<Obj|null>(null),[preview,setPreview]=useState<Obj|null>(null),[working,setWorking]=useState(false),[error,setError]=useState('');const epoch=useRef(0);
  useEffect(()=>{epoch.current++;setForm(null);setPreview(null);setError('');return()=>{epoch.current++}},[p.id]);
  function close(){if(working)return;epoch.current++;setForm(null);setPreview(null);setError('')}

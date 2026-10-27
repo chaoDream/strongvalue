@@ -34,20 +34,19 @@ def normalize(p,raw):
         d=date.fromisoformat(raw['business_date'])
         if d.isoformat()!=raw['business_date'] or d>datetime.now(ZoneInfo('Asia/Shanghai')).date():raise ValueError()
     except (TypeError,ValueError):raise HTTPException(422,'实际退回日期须为不晚于今天的YYYY-MM-DD') from None
-    source=core.find(p,reuse.COLLECTION,raw['reference_id'])
-    if not inv.event_for(p,'offcut_issue',source['id']):inv.fail('退回须引用已执行余料领用，预留或仅已审单不能退回')
+    source=reuse.issue_source(p,raw['reference_id'])
     if store.digest(source)!=raw['reference_hash']:inv.fail('原余料领用单已变化，请刷新核对')
     if raw['business_date']<source['input']['business_date']:inv.fail('实际退回日期不得早于来源余料领用交接日期')
     selections=raw['selections']
     if not isinstance(selections,list) or not 1<=len(selections)<=100:raise HTTPException(422,'退回须选择1至100条不同领用分配及正整数根数')
     rows=[];seen=set();length=Fraction(0);mass=Fraction(0)
     for a in selections:
-        if not isinstance(a,dict) or set(a)!={'allocation_index','quantity'} or type(a['allocation_index']) is not int or not 1<=a['allocation_index']<=len(source['allocations']) or a['allocation_index'] in seen or type(a['quantity']) is not int or not 1<=a['quantity']<=1000000:
+        if not isinstance(a,dict) or set(a)!={'allocation_index','quantity'} or type(a['allocation_index']) is not int or a['allocation_index'] not in reuse.issue_allocations(source) or a['allocation_index'] in seen or type(a['quantity']) is not int or not 1<=a['quantity']<=1000000:
             raise HTTPException(422,'须选择本单不同分配序号，根数为1至1000000正整数')
-        seen.add(a['allocation_index']);parent=source['allocations'][a['allocation_index']-1]
+        seen.add(a['allocation_index']);parent=reuse.issue_allocations(source)[a['allocation_index']]
         if a['quantity']>parent['quantity']:inv.fail('本次退回超过来源分配原领用根数')
         size=Fraction(parent['stock_length'])*a['quantity'];weight=size*Fraction(parent['unit_weight']);length+=size;mass+=weight
-        rows.append(dict(**{k:v for k,v in parent.items() if k not in ('quantity','total_length','mass')},**a,total_length=dec(size),mass=dec(weight)))
+        rows.append(dict(**{k:v for k,v in parent.items() if k not in ('quantity','total_length','mass','allocation_index')},**a,total_length=dec(size),mass=dec(weight)))
     return dict(reference_id=source['id'],source_name=source['demand']['source_name'],source_revision=source['demand']['source_revision'],allocations=rows,
                 totals=dict(quantity=sum(a['quantity'] for a in rows),length=dec(length),mass=dec(mass),length_unit='m',mass_unit='kg'))
 
