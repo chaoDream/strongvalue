@@ -16,7 +16,7 @@ NOTICE = ('加工结果只引用已执行的完整原材投入加工单，按实
           '提交、预览及独立复核不入库；显式执行后才登记独立余料批次，并占用对应加工单的已核对根数，禁止重复验收。'
           '余料继承原批次材质截面及每米质量，但每段实测长度、根数、库位和可留用验收均须当前原件。'
           '旧来源失效不撤销既有加工或余料入库；当前入库依据失效时保留数量并标待核查。停用余料不退回已核对加工额度，不等于实物报废或冲销。'
-          '余料与完整原材分账，不能当作原长完整根退回或直接在原预留入口使用；暂不支持余料自动回用、再加工、跨项目调拨、采购或已执行结果冲销。')
+          '余料与完整原材分账，不能当作原长完整根退回或直接在原预留入口使用；按核定定尺回用须走独立余料回用入口；暂不支持自动替换排料、再加工、跨项目调拨、采购或已执行结果冲销。')
 
 
 def execution(p, rid):
@@ -194,8 +194,11 @@ def status(p):
         except HTTPException as e:issue=str(e.detail)
         result.append(dict(record=row,object_hash=store.digest(row),phase=phase,issue=issue))
     issues={r['record']['id']:r['issue'] for r in result}
+    from .stock_offcut_reuse import balances as reuse_balances
+    movements=reuse_balances(p,lots)
     for lot in lots:
-        lot.update(issue=issues[lot['result_id']],in_stock_quantity=lot['quantity'],adopted_quantity=0 if lot['voided'] or issues[lot['result_id']] else lot['quantity'],verified=not lot['voided'] and not issues[lot['result_id']])
+        balance=movements[lot['lot_key']];verified=not lot['voided'] and not issues[lot['result_id']]
+        lot.update(**balance,issue=issues[lot['result_id']],adopted_quantity=balance['remaining'] if verified else 0,verified=verified)
     sources=[]
     for row in p['stock_operations']:
         if row['kind']=='consume' and ops.execution(p,row['id']):
@@ -251,5 +254,8 @@ def void(pid:str,rid:str,ri:int,oi:int,body:dict,a=Depends(core.actor)):
         _,lots=balances(p);lot=next((l for l in lots if l['lot_key']==key),None)
         if not lot:raise HTTPException(404,'已入库余料不存在')
         if lot['voided']:inv.fail('余料登记已停用')
+        from .stock_offcut_reuse import balances as reuse_balances
+        balance=reuse_balances(p,lots)[key]
+        if balance['reserved'] or balance['in_custody']:inv.fail('余料仍有预留或在外待加工数量，不能停用；请核查回用台账')
         text(body['basis'],'余料停用核查原因');stamp=inv.proofs(p,[body['evidence_id']])
         return inv.commit(c,p,a,'stock_events',body,dict(operation='offcut_void',target_id=key,result_id=rid,record_hash=store.digest(row),lot_code=lot['lot_code'],basis=body['basis'],evidence_id=body['evidence_id'],proof_stamp=stamp),'STOCK_OFFCUT_VOIDED')
