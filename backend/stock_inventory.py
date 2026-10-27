@@ -219,7 +219,8 @@ def status(p):
     from .stock_replenishments import status as replenishment_status
     from .stock_offcut_replenishments import status as offcut_replenishment_status
     from .stock_mixed_supply import status as mixed_status
-    return dict(mixed_supply=mixed_status(p), offcut_replenishments=offcut_replenishment_status(p), replenishments=replenishment_status(p), offcut_issues=offcut_issue_status(p), stock_counts=stock_count_status(p), offcut_counts=count_status(p), offcut_jobs=job_status(p), offcut_processing=offcut_processing_status(p), offcut_returns=return_status(p), offcut_reuse=reuse_status(p), processing=processing_status(p), receipts=receipts, reservations=reservations, events=p['stock_events'], operations=operation_status(p), operation_notice=OPERATION_NOTICE, ledger_hash=ledger_hash(p), notice=NOTICE)
+    from .stock_mixed_replenishments import status as mixed_replenishment_status
+    return dict(mixed_replenishments=mixed_replenishment_status(p), mixed_supply=mixed_status(p), offcut_replenishments=offcut_replenishment_status(p), replenishments=replenishment_status(p), offcut_issues=offcut_issue_status(p), stock_counts=stock_count_status(p), offcut_counts=count_status(p), offcut_jobs=job_status(p), offcut_processing=offcut_processing_status(p), offcut_returns=return_status(p), offcut_reuse=reuse_status(p), processing=processing_status(p), receipts=receipts, reservations=reservations, events=p['stock_events'], operations=operation_status(p), operation_notice=OPERATION_NOTICE, ledger_hash=ledger_hash(p), notice=NOTICE)
 
 
 def fields(body, expected):

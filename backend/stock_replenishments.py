@@ -67,7 +67,7 @@ def entitlement(p,parent_id,exclude=''):
     from .stock_operations import balances
     balances(p)
     parent=core.find(p,'stock_reservations',parent_id)
-    if 'mixed_supply' in parent:inv.fail('联合供应预留暂不支持补料，不能单侧重新取额')
+    if 'mixed_supply' in parent:inv.fail('联合供应须走联合未领补料入口，不能单侧重新取额')
     event=inv.event_for(p,'release_remaining',parent_id)
     if not event:inv.fail('须选择本项目已分批领出并显式释放未领余量的完整原材预留')
     meta=dict(parent_id=parent['id'],parent_hash=store.digest(parent),release_id=event['id'],release_hash=store.digest(event))

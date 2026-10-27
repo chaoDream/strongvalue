@@ -21,7 +21,7 @@ from .compound_takeoff import component_quantity, structured_validator, STRUCTUR
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.131.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.132.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -1510,6 +1510,9 @@ app.include_router(stock_offcut_replenishments_router)
 
 from .stock_mixed_supply import router as stock_mixed_supply_router
 app.include_router(stock_mixed_supply_router)
+
+from .stock_mixed_replenishments import router as stock_mixed_replenishments_router
+app.include_router(stock_mixed_replenishments_router)
 
 from .report_preview import router as report_preview_router
 app.include_router(report_preview_router)

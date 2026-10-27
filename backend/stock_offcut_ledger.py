@@ -105,7 +105,7 @@ def replay(p,base_lots):
                 indexed={i:a for i,a in enumerate(allocations,1)}
             if 'mixed_supply' in reservation:
                 from .stock_mixed_supply import reviewed
-                reviewed(p,reservation)
+                reviewed(p,reservation,event=e)
             if 'replenishment' in reservation and reservation['replenishment']['release_id'] not in released_events:inv.fail('余料补料领用早于上游未领释放')
             if reservation['id'] in released or e.get('allocations')!=allocations or e.get('totals')!=totals:inv.fail('余料领用晚于释放或冻结数量不符')
             before=taken.setdefault(reservation['id'],{})

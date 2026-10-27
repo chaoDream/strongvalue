@@ -127,7 +127,7 @@ def balances(p):
             rid=row['input']['reference_id'];reservation=core.find(p,'stock_reservations',rid)
             if 'mixed_supply' in reservation:
                 from .stock_mixed_supply import reviewed
-                reviewed(p,reservation)
+                reviewed(p,reservation,event=event)
             if 'replenishment' in reservation:
                 release_id=reservation['replenishment']['release_id']
                 if not any(x['id']==release_id for x in p['stock_events'][:p['stock_events'].index(event)]):inv.fail('补料领出早于上游未领余量释放')
