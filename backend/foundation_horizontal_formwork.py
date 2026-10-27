@@ -21,6 +21,7 @@ from . import foundation_polygon_windows as polygon_windows
 from . import foundation_simple_windows as simple_windows
 from . import foundation_perforated_windows as perforated_windows
 from . import foundation_multi_windows as multi_windows
+from . import foundation_nested_windows as nested_windows
 
 VERSION = 'foundation-horizontal-formwork-1.0'
 FACES = {'top': '整体最顶面', 'bottom': '整体最底面', 'step':'台阶中间整个平台', **ends.FACES}
@@ -136,7 +137,7 @@ def calculate(comp, source=None):
         else:
             tier,z,single_gross,gross_ast,holes = geometry(item,d['face'])
         if windows.enabled(d):
-            window_fn = multi_windows.geometry if multi_windows.enabled(d) else perforated_windows.geometry if perforated_windows.enabled(d) else simple_windows.geometry if simple_windows.enabled(d) else polygon_windows.geometry if polygon_windows.enabled(d) else end_windows.geometry if d['face'] in ends.FACES else ((round_windows.geometry if 'diameter' in tier['normalized_parameters'] else step_windows.geometry) if d['face']=='step' else windows.geometry)
+            window_fn = nested_windows.geometry if nested_windows.enabled(d) else multi_windows.geometry if multi_windows.enabled(d) else perforated_windows.geometry if perforated_windows.enabled(d) else simple_windows.geometry if simple_windows.enabled(d) else polygon_windows.geometry if polygon_windows.enabled(d) else end_windows.geometry if d['face'] in ends.FACES else ((round_windows.geometry if 'diameter' in tier['normalized_parameters'] else step_windows.geometry) if d['face']=='step' else windows.geometry)
             single_gross,gross_ast,holes,window_extra,window_asts = window_fn(d,item,tier,single_gross,gross_ast,holes,'horizontal_formwork.'+str(i),dimensions,refs,conversions)
             extra.update(window_extra); extra_asts.update(window_asts)
         single_cut = sum((Decimal(h['single_area']) for h in holes), Decimal(0)); single_net = single_gross-single_cut
@@ -163,6 +164,7 @@ def calculate(comp, source=None):
     has_simple = any(d.get('simple_polygon_window') for d in rows)
     has_perforated = any(d.get('perforated_polygon_window') for d in rows)
     has_multi = any(d.get('multi_polygon_window') for d in rows)
+    has_nested = any(d.get('nested_polygon_window') for d in rows)
     return dict(quantity=str(q), gross=str(gross), deduction=str(cut), unit='m²', parameters={}, material=comp['material'],
                 formula=('Σ[(所选孔∩混凝土侧层∩窗口−所选孔∩同侧相接孔∩窗口)×全部基础个数；及其他已选水平面]；仅总净面积HALF_UP修约' if has_end_window else 'Σ[(所选整面或窗口内真实外露面积−本范围内实际孔交集)×全部基础个数]；平台窗口扣上层共同覆盖；仅总净面积HALF_UP修约' if has_step_window else 'Σ[(已选整面或XY窗口与真实端层交集−本范围内实际孔交集)×全部基础个数]；仅总净面积HALF_UP修约' if has_window else 'Σ[(所选水平面实际毛面积−实际孔交集)×全部基础个数]；孔端毛面积=所选孔与混凝土侧层交集，扣该侧相接孔交集；仅总净面积HALF_UP修约' if has_end else 'Σ[(已选水平面毛面积−该面实际孔交集)×已审全部基础个数]；平台毛面积=下层截面−上层完整截面；仅总净面积HALF_UP修约' if has_step else 'Σ[(已选整体顶面或底面真实截面−贯通该端面的实际孔截面)×已审全部基础个数]；仅总净面积HALF_UP修约')+str(digits)+'位',
                 formula_ast=dict(op='round',args=[op('add',*nodes)],digits=digits,mode='HALF_UP'), dimensions=dimensions, source_evidence=refs,
@@ -170,7 +172,7 @@ def calculate(comp, source=None):
                 source_component_hash=comp['source_component_hash'], contact_ranges=rows,
                 horizontal_formwork_summary=dict(source_name=source['name'],source_revision=source['revision'],range_count=len(rows),unrounded_quantity=str(net),rounding_digits=digits,rounding_adjustment=str(q-net)),
                 **({'horizontal_formwork_pi_constant':PI} if has_pi else {}),
-                rounding_rule='Decimal 80位及记录的固定π，沿用来源未修约尺寸和全部最终基础个数；逐面逐孔不修约，仅总净面积HALF_UP修约',rule_version=multi_windows.VERSION if has_multi else perforated_windows.VERSION if has_perforated else simple_windows.VERSION if has_simple else polygon_windows.VERSION if has_polygon else end_windows.VERSION if has_end_window else round_windows.VERSION if has_round_window else step_windows.VERSION if has_step_window else windows.VERSION if has_window else ends.VERSION if has_end else 'foundation-horizontal-formwork-1.2' if has_curve else 'foundation-horizontal-formwork-1.1' if has_step else VERSION,notice=multi_windows.NOTICE if has_multi else perforated_windows.NOTICE if has_perforated else simple_windows.NOTICE if has_simple else polygon_windows.NOTICE if has_polygon else end_windows.NOTICE if has_end_window else round_windows.NOTICE if has_round_window else step_windows.NOTICE if has_step_window else windows.NOTICE if has_window else ends.NOTICE if has_end else steps.CURVED_NOTICE if has_curve else steps.NOTICE if has_step else NOTICE,**({'horizontal_window_checks':windows.checks(rows)} if has_window else {}))
+                rounding_rule='Decimal 80位及记录的固定π，沿用来源未修约尺寸和全部最终基础个数；逐面逐孔不修约，仅总净面积HALF_UP修约',rule_version=nested_windows.VERSION if has_nested else multi_windows.VERSION if has_multi else perforated_windows.VERSION if has_perforated else simple_windows.VERSION if has_simple else polygon_windows.VERSION if has_polygon else end_windows.VERSION if has_end_window else round_windows.VERSION if has_round_window else step_windows.VERSION if has_step_window else windows.VERSION if has_window else ends.VERSION if has_end else 'foundation-horizontal-formwork-1.2' if has_curve else 'foundation-horizontal-formwork-1.1' if has_step else VERSION,notice=nested_windows.NOTICE if has_nested else multi_windows.NOTICE if has_multi else perforated_windows.NOTICE if has_perforated else simple_windows.NOTICE if has_simple else polygon_windows.NOTICE if has_polygon else end_windows.NOTICE if has_end_window else round_windows.NOTICE if has_round_window else step_windows.NOTICE if has_step_window else windows.NOTICE if has_window else ends.NOTICE if has_end else steps.CURVED_NOTICE if has_curve else steps.NOTICE if has_step else NOTICE,**({'horizontal_window_checks':windows.checks(rows)} if has_window else {}))
 
 
 def validate(p, comp, saved=False):

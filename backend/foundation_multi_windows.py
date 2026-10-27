@@ -84,7 +84,7 @@ def trace(parts):
     return result
 
 
-def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions):
+def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions,topology_fn=topology,trace_fn=trace):
     c=d['plan_range'];parts=[]
     for i,p in enumerate(c['parts'],1):
         config=part_config(c,p);child={**d,'plan_range':config};part_key=key+'.parts.'+str(i)
@@ -102,14 +102,14 @@ def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions
         if any(q['hole_index']!=h['hole_index'] for q in cuts):raise DomainError('多块窗口实体孔索引不一致')
         q={**cuts[0], 'single_area':str(total('single_area',cuts)), 'formula_ast':op('add',*[v['formula_ast'] for v in cuts]),
            'formula_asts':dict(cuts[0]['formula_asts']), 'intersection_rule':'逐块按窗口净区与实际孔相交后累计，块间空区和窗口内孔不扣；'+RULE,
-           'curved_intersection':trace([(p['index'],v['curved_intersection']) for p,v in zip(parts,cuts)])}
+           'curved_intersection':trace_fn([(p['index'],v['curved_intersection']) for p,v in zip(parts,cuts)])}
         q['formula_asts']['single_area']=q['formula_ast']
         for field in ('window_hole_area','covered_area','window_direct_area'):
             if field in q:q[field]=str(total(field,cuts));q['formula_asts'][field]=add(field,cuts)
         for field in ('polygon_cut_trace','window_hole_curved_intersection'):
-            if field in q:q[field]=trace([(p['index'],v[field]) for p,v in zip(parts,cuts)])
+            if field in q:q[field]=trace_fn([(p['index'],v[field]) for p,v in zip(parts,cuts)])
         clipped.append(q)
-    net_trace=trace([(p['index'],p['polygon_net_trace']) for p in parts]);direct=total('polygon_direct_net_area');zero=None
+    net_trace=trace_fn([(p['index'],p['polygon_net_trace']) for p in parts]);direct=total('polygon_direct_net_area');zero=None
     if gross>0 and not net_trace['terms'] and clipped:
         index=next((i for i in reversed(range(len(clipped))) if Decimal(clipped[i]['single_area'])>0),None)
         if index is not None:
@@ -118,11 +118,11 @@ def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions
             h=clipped[index];node=op('subtract',gross_node,op('add',*[v['formula_ast'] for v in others]))
             h.update(single_area=str(amount),formula_ast=node);h['formula_asts']['single_area']=node
             zero=dict(method='全部净块的全部边界事件分段无剩余接触，按毛面积减其他孔扣的分割恒等式计量，非容差归零',canonical_hole_index=h['hole_index'],net_trace=net_trace)
-    extra=dict(multi_polygon_window=True,polygon_window=True,window_parts=parts,window_part_checks=topology(c),
+    extra=dict(multi_polygon_window=True,polygon_window=True,window_parts=parts,window_part_checks=topology_fn(c),
         full_face_area=str(original),window_area=str(total('window_area')),window_outer_area=str(sum((Decimal(p.get('window_outer_area',p['window_area'])) for p in parts),Decimal(0))),
         window_exclusion_area=str(sum((Decimal(p.get('window_exclusion_area','0')) for p in parts),Decimal(0))),window_intersection_rule=RULE,
-        polygon_gross_trace=trace([(p['index'],p['polygon_gross_trace']) for p in parts]),polygon_net_trace=net_trace,polygon_direct_net_area=str(direct),
-        window_curved_intersection=trace([(p['index'],p['window_curved_intersection']) for p in parts]),
+        polygon_gross_trace=trace_fn([(p['index'],p['polygon_gross_trace']) for p in parts]),polygon_net_trace=net_trace,polygon_direct_net_area=str(direct),
+        window_curved_intersection=trace_fn([(p['index'],p['window_curved_intersection']) for p in parts]),
         window_expression_definitions=[v for p in parts for v in p['window_expression_definitions']],plan_frame_hash=parts[0]['plan_frame_hash'])
     nodes=dict(full_face_area=full_ast,window_area=add('window_area'),polygon_direct_net_area=add('polygon_direct_net_area'),
         window_outer_area=op('add',*[p['formula_asts'].get('window_outer_area',p['formula_asts']['window_area']) for p in parts]),
@@ -135,5 +135,5 @@ def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions
     if d['face'] in ('hole_top','hole_bottom'):extra['hole_end_window']=True
     if d['face']=='step':
         for field in ('window_lower_area','window_upper_area'):extra[field]=str(total(field));nodes[field]=add(field)
-        extra['window_upper_curved_intersection']=trace([(p['index'],p['window_upper_curved_intersection']) for p in parts])
+        extra['window_upper_curved_intersection']=trace_fn([(p['index'],p['window_upper_curved_intersection']) for p in parts])
     return gross,gross_node,clipped,extra,nodes
