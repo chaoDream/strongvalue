@@ -73,6 +73,11 @@ def review_batch_targets(pid: str, collection: str, a=Depends(core.actor)):
             objects = [x for x in objects if x['id'] == p['pricing_bases'][-1]['id']]
         if collection == 'document_requests':
             objects = [x for x in objects if x['state'] == 'submitted']
+        if collection in ('stock_operations', 'stock_offcut_issues'):
+            # Cancellation/execution are immutable events, not changes to row.state.
+            from . import stock_inventory as inv
+            kinds = ('issue', 'partial_issue', 'consume', 'return', 'cancel') if collection == 'stock_operations' else ('offcut_partial_issue', 'offcut_partial_cancel')
+            objects = [x for x in objects if not any(inv.event_for(p, kind, x['id']) for kind in kinds)]
         return {'targets': [{'object': x, 'object_hash': store.digest(x)} for x in objects[:200]], 'total': len(objects)}
 
 
