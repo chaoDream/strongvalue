@@ -2820,3 +2820,6 @@ input::placeholder,textarea::placeholder {
 .stock-inventory-panel td p {margin:6px 0;line-height:1.7;}
 .stock-inventory-panel > h3,.stock-inventory-panel > details {margin:18px 22px 10px;}
 .stock-inventory-panel td .text-btn {white-space:normal;}
+
+.stock-operations > h4,.stock-operations > .form-note {margin:18px 22px 10px;}
+.stock-operations td .actions,.stock-inventory-panel td .actions {flex-wrap:wrap;}
