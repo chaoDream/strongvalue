@@ -48,9 +48,9 @@ def topology(c):
     return contained,pairs
 
 
-def validate(c):
+def validate(c,*,min_holes=2):
     fields={'shape','parameters','evidence','unit','coordinate_basis','coordinate_evidence_id','scope_confirmed','holes'}
-    if not isinstance(c,dict) or set(c)!=fields or not isinstance(c['holes'],list) or not 2<=len(c['holes'])<=4:
+    if not isinstance(c,dict) or set(c)!=fields or not isinstance(c['holes'],list) or not min_holes<=len(c['holes'])<=4:
         raise DomainError('多内圆窗口须圆形外轮廓、2至4个内圆列表、共同单位／XY基准和确认；一个内圆请用可偏心内圆模式')
     circular.validate({k:v for k,v in c.items() if k!='holes'})
     names=set()

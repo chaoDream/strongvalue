@@ -84,12 +84,12 @@ def trace(parts):
     return result
 
 
-def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions,topology_fn=topology,trace_fn=trace):
+def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions,topology_fn=topology,trace_fn=trace,part_config_fn=part_config,geometry_fn=None):
     c=d['plan_range'];parts=[]
     for i,p in enumerate(c['parts'],1):
-        config=part_config(c,p);child={**d,'plan_range':config};part_key=key+'.parts.'+str(i)
+        config=part_config_fn(c,p);child={**d,'plan_range':config};part_key=key+'.parts.'+str(i)
         refs[part_key+'.basis']=p['evidence_id']
-        gross,node,cut,extra,nodes=(perforated.geometry if p['holes'] else simple.geometry)(child,item,tier,original,full_ast,holes,part_key,dimensions,refs,conversions)
+        gross,node,cut,extra,nodes=(geometry_fn or (perforated.geometry if p['holes'] else simple.geometry))(child,item,tier,original,full_ast,holes,part_key,dimensions,refs,conversions)
         cut_area=sum((Decimal(h['single_area']) for h in cut),Decimal(0));cut_node=op('add',*[h['formula_ast'] for h in cut])
         parts.append(dict(index=i,name=p['name'],measurement_basis=p['measurement_basis'],evidence_id=p['evidence_id'],plan_range=config,
             single_gross_area=str(gross),single_opening_area=str(cut_area),single_net_area=str(gross-cut_area),apertures=cut,**extra,
