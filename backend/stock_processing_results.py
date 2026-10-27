@@ -209,9 +209,11 @@ def status(p):
     issues.update(execution_issues(p))
     from .stock_offcut_returns import proof_issues
     return_issues=proof_issues(p)
+    from .stock_offcut_counts import proof_issues as count_proof_issues
+    count_issues=count_proof_issues(p)
     lot_issues={}
     for lot in lots:
-        balance=movements[lot['lot_key']];issue='；'.join(v for v in (issues[lot['result_id']],return_issues.get(lot['lot_key'],''),lot_issues.get(lot.get('parent_lot_key',''),'')) if v);verified=not lot['voided'] and not issue
+        balance=movements[lot['lot_key']];issue='；'.join(v for v in (issues[lot['result_id']],return_issues.get(lot['lot_key'],''),count_issues.get(lot['lot_key'],''),lot_issues.get(lot.get('parent_lot_key',''),'')) if v);verified=not lot['voided'] and not issue
         lot_issues[lot['lot_key']]=issue
         lot.update(**balance,issue=issue,adopted_quantity=balance['remaining'] if verified else 0,verified=verified)
     sources=[]

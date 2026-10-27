@@ -3,10 +3,10 @@ from . import store, stock_inventory as inv
 
 
 def replay(p,base_lots):
-    from . import stock_offcut_reuse as reuse, stock_offcut_returns as returns, stock_offcut_processing as processing, stock_offcut_jobs as job_module
+    from . import stock_offcut_reuse as reuse, stock_offcut_returns as returns, stock_offcut_processing as processing, stock_offcut_jobs as job_module, stock_offcut_counts as counts
     lots=[dict(l) for l in base_lots if l.get('origin')!='offcut_processing'];by_key={l['lot_key']:l for l in lots}
-    movements={k:dict(issued_quantity=0,returned_quantity=0,processed_quantity=0,processing_quantity=0) for k in by_key}
-    records={r['id']:r for name in (reuse.COLLECTION,returns.COLLECTION,processing.COLLECTION,job_module.COLLECTION) for r in p[name]}
+    movements={k:dict(issued_quantity=0,returned_quantity=0,processed_quantity=0,processing_quantity=0,adjustment_gain=0,adjustment_loss=0,count_revision=0) for k in by_key}
+    records={r['id']:r for name in (reuse.COLLECTION,returns.COLLECTION,processing.COLLECTION,job_module.COLLECTION,counts.COLLECTION) for r in p[name]}
     all_results={r['id']:r for name in ('stock_processing_results',processing.COLLECTION) for r in p[name]}
     used=set();active=set();applied=set();stopped=set();issues={};jobs={}
     receipt_ids={(r['input']['warehouse'].strip(),r['input']['lot_code'].strip()) for r in p['stock_receipts']}
@@ -27,14 +27,20 @@ def replay(p,base_lots):
             m=movements[lot['lot_key']]
             if m['issued_quantity']-m['returned_quantity'] or m['processed_quantity']:inv.fail('余料停用仍有在外或已加工原段，不能伪造停用顺序')
             stopped.add(lot['lot_key'])
-        if kind not in ('offcut_issue','offcut_release','offcut_return','offcut_return_cancel','offcut_process','offcut_process_cancel','offcut_start','offcut_start_cancel'):continue
+        if kind not in ('offcut_issue','offcut_release','offcut_return','offcut_return_cancel','offcut_process','offcut_process_cancel','offcut_start','offcut_start_cancel','offcut_count','offcut_count_cancel'):continue
         row=records.get(e['target_id'])
-        expected_collection=job_module.COLLECTION if kind.startswith('offcut_start') else processing.COLLECTION if kind.startswith('offcut_process') else returns.COLLECTION if kind.startswith('offcut_return') else reuse.COLLECTION
+        expected_collection=counts.COLLECTION if kind.startswith('offcut_count') else job_module.COLLECTION if kind.startswith('offcut_start') else processing.COLLECTION if kind.startswith('offcut_process') else returns.COLLECTION if kind.startswith('offcut_return') else reuse.COLLECTION
         if not row or not any(r['id']==row['id'] for r in p[expected_collection]) or row['id'] in applied or e.get('record_hash')!=store.digest(row):inv.fail('余料事件、原单类型或历史关联无法核验')
         applied.add(row['id'])
-        if kind in ('offcut_release','offcut_return_cancel','offcut_process_cancel','offcut_start_cancel'):continue
+        if kind in ('offcut_release','offcut_return_cancel','offcut_process_cancel','offcut_start_cancel','offcut_count_cancel'):continue
         if not inv.approved(p,expected_collection,row):inv.fail('余料已执行单据缺少匹配的独立复核')
-        if kind=='offcut_start':
+        if kind=='offcut_count':
+            lot=by_key.get(row.get('lot_key'))
+            if not lot or lot['lot_key'] not in active or lot['lot_key'] in stopped:inv.fail('盘点早于余料入库或晚于停用')
+            m=movements[lot['lot_key']];computed=counts.normalize(row['input'],lot,m)
+            if any(row.get(k)!=v for k,v in computed.items()) or any(e.get(k)!=row[k] for k in ('lot_key','before','after','delta','length_delta','mass_delta')):inv.fail('盘点实盘、差异或冻结事件无法核验')
+            m['adjustment_gain']+=max(0,row['delta']);m['adjustment_loss']+=max(0,-row['delta']);m['count_revision']+=1
+        elif kind=='offcut_start':
             computed=job_module.normalize(p,row['input'])
             if any(row[k]!=v for k,v in computed.items()) or e.get('reference_id')!=row['reference_id'] or e.get('allocations')!=row['allocations'] or e.get('totals')!=row['totals']:inv.fail('实际投入加工规格、根数或来源关联无法核验')
             source=issues.get(row['reference_id'])
@@ -60,7 +66,7 @@ def replay(p,base_lots):
                 parent['consumed']+=a['quantity'];movements[a['parent_lot_key']]['processed_quantity']+=a['quantity']
                 for child in processing.child_lots(row,a):
                     if child['lot_key'] in by_key:inv.fail('再加工余料重复入库')
-                    admit(child);lots.append(child);by_key[child['lot_key']]=child;movements[child['lot_key']]=dict(issued_quantity=0,returned_quantity=0,processed_quantity=0,processing_quantity=0)
+                    admit(child);lots.append(child);by_key[child['lot_key']]=child;movements[child['lot_key']]=dict(issued_quantity=0,returned_quantity=0,processed_quantity=0,processing_quantity=0,adjustment_gain=0,adjustment_loss=0,count_revision=0)
         elif kind=='offcut_return':
             computed=returns.normalize(p,row['input'])
             if any(row[k]!=v for k,v in computed.items()) or e.get('reference_id')!=row['reference_id'] or e.get('allocations')!=row['allocations'] or e.get('totals')!=row['totals']:inv.fail('原段退回规格、根数或关联无法核验')
@@ -77,10 +83,10 @@ def replay(p,base_lots):
             for a in allocations:
                 if a['lot_key'] not in active or a['lot_key'] in stopped:inv.fail('余料领用早于实际入库或晚于停用')
                 m=movements[a['lot_key']];m['issued_quantity']+=a['quantity']
-                if m['issued_quantity']-m['returned_quantity']>by_key[a['lot_key']]['quantity']:inv.fail('余料领用超出实际在库数量')
+                if m['issued_quantity']-m['returned_quantity']>by_key[a['lot_key']]['quantity']+m['adjustment_gain']-m['adjustment_loss']:inv.fail('余料领用超出实际在库数量')
     for lot in lots:
-        key=lot['lot_key'];m=movements[key];custody=m['issued_quantity']-m['returned_quantity']-m['processed_quantity']-m['processing_quantity'];on_hand=lot['quantity']-m['issued_quantity']+m['returned_quantity'];reserved=reuse.held(p,key)
-        if min(custody,on_hand,m['processing_quantity'],m['processed_quantity'])<0 or reserved>on_hand or on_hand+custody+m['processed_quantity']+m['processing_quantity']!=lot['quantity']:inv.fail('余料在库、在外、已加工或预留台账不闭合')
+        key=lot['lot_key'];m=movements[key];custody=m['issued_quantity']-m['returned_quantity']-m['processed_quantity']-m['processing_quantity'];adjusted=lot['quantity']+m['adjustment_gain']-m['adjustment_loss'];on_hand=adjusted-m['issued_quantity']+m['returned_quantity'];reserved=reuse.held(p,key)
+        if min(custody,on_hand,m['processing_quantity'],m['processed_quantity'])<0 or reserved>on_hand or on_hand+custody+m['processed_quantity']+m['processing_quantity']!=adjusted:inv.fail('余料在库、在外、已加工或预留台账不闭合')
         lot['voided']=key in stopped
-        m.update(in_stock_quantity=on_hand,in_custody=custody,reserved=reserved,remaining=on_hand-reserved)
+        m.update(adjusted_quantity=adjusted,in_stock_quantity=on_hand,in_custody=custody,reserved=reserved,remaining=on_hand-reserved)
     return dict(lots=lots,movements=movements,issues=issues,jobs=jobs)
