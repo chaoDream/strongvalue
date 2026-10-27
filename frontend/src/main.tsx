@@ -204,7 +204,7 @@ function App() {
           {collection==='stock_offcut_issues'&&<OffcutIssueDetails item={item} sourceLink={evidenceLink}/>}
           {collection==='stock_offcut_jobs'&&<OffcutJobDetails item={item} sourceLink={evidenceLink}/>}
           {collection==='stock_offcut_returns'&&<OffcutReturnDetails item={item} sourceLink={evidenceLink}/>}
-          {collection==='stock_offcut_reservations'&&<OffcutReuseDetails item={item} sourceLink={evidenceLink}/>}
+          {collection==='stock_offcut_reservations'&&<OffcutReuseDetails p={p} item={item} sourceLink={evidenceLink}/>}
           {(collection==='stock_processing_results'||collection==='stock_offcut_processing')&&<ProcessingDetails item={item} sourceLink={evidenceLink}/>}
           {collection==='stock_operations'&&<StockOperationDetails item={item} sourceLink={evidenceLink}/>}
           {collection==='stock_reservations'&&item.replenishment&&<ReplenishmentDetails p={p} item={item} sourceLink={evidenceLink}/>}

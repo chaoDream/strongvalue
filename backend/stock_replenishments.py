@@ -13,18 +13,21 @@ NOTICE=('仅完整原材已分批领出后显式释放的未领余量，可在�
         '同一上游余量同一时点只能有一份补料预留；新预留未领前整单释放后可重做，有领出后须沿新预留自己的未领释放继续核定，不能回上级重复取额。最多20级。')
 
 
-def frozen(p,row,trail=()):
+def frozen(p,row,trail=(),*,offcut=False):
     """Structural entitlement only; lost current files must not roll back historical facts."""
     inv.intact(row)
     if row['id'] in trail or len(trail)>20:inv.fail('补料关联循环或超过20级，请核查原始供应链')
     meta=row.get('replenishment')
     if meta is None:return row['demand'],[row['id']]
     if not isinstance(meta,dict) or set(meta)!={'parent_id','parent_hash','release_id','release_hash'}:inv.fail('补料原预留及释放快照字段无法核验')
-    parent=core.find(p,'stock_reservations',meta['parent_id']);base,ancestors=frozen(p,parent,trail+(row['id'],))
+    collection='stock_offcut_reservations' if offcut else 'stock_reservations'
+    operation='offcut_release_remaining' if offcut else 'release_remaining'
+    hash_key='record_hash' if offcut else 'object_hash'
+    parent=core.find(p,collection,meta['parent_id']);base,ancestors=frozen(p,parent,trail+(row['id'],),offcut=offcut)
     event=next((e for e in p['stock_events'] if e['id']==meta['release_id']),None)
-    if not event or event['operation']!='release_remaining' or event['target_id']!=parent['id'] or event.get('object_hash')!=store.digest(parent) or meta['parent_hash']!=store.digest(parent) or meta['release_hash']!=store.digest(event):inv.fail('补料关联的上游预留或未领余量释放快照不符')
+    if not event or event['operation']!=operation or event['target_id']!=parent['id'] or event.get(hash_key)!=store.digest(parent) or meta['parent_hash']!=store.digest(parent) or meta['release_hash']!=store.digest(event):inv.fail('补料关联的上游预留或未领余量释放快照不符')
     inv.intact(event)
-    if not inv.approved(p,'stock_reservations',parent):inv.fail('补料上游缺少匹配的独立复核')
+    if not inv.approved(p,collection,parent):inv.fail('补料上游缺少匹配的独立复核')
     if row['source_id']!=parent['source_id'] or row.get('created_at',event['created_at'])<event['created_at']:inv.fail('补料来源跨材料表或早于释放事实')
     by_key={d['key']:d for d in base['demands']};counts={};seen=set()
     if not isinstance(event.get('allocations'),list) or not event['allocations']:inv.fail('未领释放没有冻结分配')
@@ -32,7 +35,12 @@ def frozen(p,row,trail=()):
         index=a.get('allocation_index')
         if type(index) is not int or not 1<=index<=len(parent['allocations']) or index in seen or type(a.get('quantity')) is not int or not 1<=a['quantity']<=1000000:inv.fail('未领释放的原分配序号或根数无效')
         seen.add(index);original=parent['allocations'][index-1]
-        if set(a)!={'allocation_index','demand_key','receipt_id','quantity'} or any(a[k]!=original[k] for k in ('demand_key','receipt_id')) or a['quantity']>original['quantity'] or a['demand_key'] not in by_key:inv.fail('未领释放分配不能替换或超过上游原预留')
+        if offcut:
+            from .stock_offcut_issues import selection_values
+            expected,_=selection_values(parent,[dict(allocation_index=index,quantity=a['quantity'])])
+            same=a==expected[0]
+        else:same=set(a)=={'allocation_index','demand_key','receipt_id','quantity'} and all(a[k]==original[k] for k in ('demand_key','receipt_id'))
+        if not same or a['quantity']>original['quantity'] or a['demand_key'] not in by_key:inv.fail('未领释放分配不能替换或超过上游原预留')
         counts[a['demand_key']]=counts.get(a['demand_key'],0)+a['quantity']
     if any(n>by_key[k]['quantity'] for k,n in counts.items()):inv.fail('补料不能增加原定尺需求')
     value={k:v for k,v in base.items() if k not in ('demands','demand_hash')}
@@ -40,17 +48,17 @@ def frozen(p,row,trail=()):
     return {**value,'demand_hash':store.digest(value)},ancestors+[row['id']]
 
 
-def audit(p):
+def audit(p,*,offcut=False):
     groups={}
-    for row in p['stock_reservations']:
+    for row in p['stock_offcut_reservations' if offcut else 'stock_reservations']:
         if 'replenishment' not in row:continue
-        demand,_=frozen(p,row)
+        demand,_=frozen(p,row,offcut=offcut)
         if row['demand']!=demand:inv.fail('补料需求与冻结未领释放额度不符')
         groups.setdefault(row['replenishment']['parent_id'],[]).append(row)
     for rows in groups.values():
         ordered=sorted(rows,key=lambda r:(r['created_at'],r['id']))
         for previous,current in zip(ordered,ordered[1:]):
-            event=inv.event_for(p,'release',previous['id'])
+            event=inv.event_for(p,'offcut_release' if offcut else 'release',previous['id'])
             if not event or event['created_at']>current['created_at']:inv.fail('同一未领余量重复分配补料预留，或先后顺序无法核验')
 
 

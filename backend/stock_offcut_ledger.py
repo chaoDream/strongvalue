@@ -4,11 +4,13 @@ from . import store, stock_inventory as inv
 
 def replay(p,base_lots):
     from . import stock_offcut_reuse as reuse, stock_offcut_returns as returns, stock_offcut_processing as processing, stock_offcut_jobs as job_module, stock_offcut_counts as counts, stock_offcut_issues as issue_module
+    from .stock_replenishments import audit
+    audit(p,offcut=True)
     lots=[dict(l) for l in base_lots if l.get('origin')!='offcut_processing'];by_key={l['lot_key']:l for l in lots}
     movements={k:dict(issued_quantity=0,returned_quantity=0,processed_quantity=0,processing_quantity=0,adjustment_gain=0,adjustment_loss=0,count_revision=0) for k in by_key}
     records={r['id']:r for name in (reuse.COLLECTION,returns.COLLECTION,processing.COLLECTION,job_module.COLLECTION,counts.COLLECTION,issue_module.COLLECTION) for r in p[name]}
     all_results={r['id']:r for name in ('stock_processing_results',processing.COLLECTION) for r in p[name]}
-    used=set();active=set();applied=set();stopped=set();issues={};jobs={};taken={};released=set()
+    released_events=set();used=set();active=set();applied=set();stopped=set();issues={};jobs={};taken={};released=set()
     receipt_ids={(r['input']['warehouse'].strip(),r['input']['lot_code'].strip()) for r in p['stock_receipts']}
 
     def admit(lot):
@@ -42,7 +44,7 @@ def replay(p,base_lots):
                 if not any(prior.values()) or not selections:inv.fail('未领余量释放缺少先前分批领用或尚未领余额')
                 values,total=issue_module.selection_values(row,selections)
                 if e.get('allocations')!=values or e.get('totals')!=total:inv.fail('余料未领余量释放分配或数量无法核验')
-            released.add(row['id']);continue
+            released.add(row['id']);released_events.add(e['id']);continue
         if kind in ('offcut_partial_cancel','offcut_return_cancel','offcut_process_cancel','offcut_start_cancel','offcut_count_cancel'):continue
         if not inv.approved(p,expected_collection,row):inv.fail('余料已执行单据缺少匹配的独立复核')
         if kind=='offcut_count':
@@ -95,9 +97,11 @@ def replay(p,base_lots):
                 if original!=reservation['allocations']:inv.fail('原余料预留冻结分配与实际规格不符')
                 allocations,totals=row['allocations'],row['totals'];indexed=reuse.issue_allocations(row)
             else:
+                if 'replenishment' in row:inv.fail('补料预留不得冒充实际余料领用批单')
                 reservation=row;allocations,totals=reuse.allocation_values(row['demand'],row['input']['allocations'],lots)
                 if allocations!=row['allocations'] or totals!=row['totals'] or any(taken.get(row['id'],{}).values()):inv.fail('整单余料领用重复或覆盖既有分批')
                 indexed={i:a for i,a in enumerate(allocations,1)}
+            if 'replenishment' in reservation and reservation['replenishment']['release_id'] not in released_events:inv.fail('余料补料领用早于上游未领释放')
             if reservation['id'] in released or e.get('allocations')!=allocations or e.get('totals')!=totals:inv.fail('余料领用晚于释放或冻结数量不符')
             before=taken.setdefault(reservation['id'],{})
             for i,a in indexed.items():
