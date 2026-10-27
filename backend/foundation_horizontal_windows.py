@@ -25,13 +25,17 @@ def enabled(d):return isinstance(d,dict) and 'plan_range' in d
 def bounds(d):
     from . import foundation_polygon_windows as polygon
     from . import foundation_simple_windows as simple
-    if polygon.enabled(d) or simple.enabled(d): return polygon.bounds(d)
+    from . import foundation_perforated_windows as perforated
+    if polygon.enabled(d) or simple.enabled(d) or perforated.enabled(d): return polygon.bounds(d)
     c=d['plan_range'];return tuple(linear(c['parameters'][k],c['unit']) for k in FIELDS)
 
 
 def validate_config(c):
     from . import foundation_polygon_windows as polygon
     from . import foundation_simple_windows as simple
+    from . import foundation_perforated_windows as perforated
+    if perforated.enabled(dict(plan_range=c)):
+        perforated.validate(c); return
     if simple.enabled(dict(plan_range=c)):
         simple.validate(c); return
     if polygon.enabled(dict(plan_range=c)):
@@ -59,6 +63,8 @@ def check_frames(rows,others,conflict=False):
 
 def overlaps(a,b):
     if not (enabled(a) and enabled(b)):return True
+    from . import foundation_perforated_windows as perforated
+    if perforated.enabled(a) or perforated.enabled(b):return perforated.separation(a,b)['overlap']
     from . import foundation_simple_windows as simple
     if simple.enabled(a) or simple.enabled(b):return simple.separation(a,b)['overlap']
     from . import foundation_polygon_windows as polygon
@@ -103,6 +109,11 @@ def checks(rows):
             if a['face']=='step' and a['level_index']!=b['level_index']:continue
             if a['face'] in ('hole_bottom','hole_top') and a['hole_index']!=b['hole_index']:continue
             from . import foundation_simple_windows as simple
+            from . import foundation_perforated_windows as perforated
+            if perforated.enabled(a) or perforated.enabled(b):
+                s=perforated.separation(b,a)
+                result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],**s))
+                continue
             if simple.enabled(a) or simple.enabled(b):
                 s=simple.separation(b,a)
                 result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],**s))

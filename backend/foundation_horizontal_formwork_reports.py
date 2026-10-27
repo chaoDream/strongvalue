@@ -104,7 +104,7 @@ def window_tables(snapshot):
         (WINDOW_TITLES[2],['模板 / 窗口','原始坐标及单位','逐坐标原件','共用基础XY基准及原件'],[
             [t['name']+' / C'+str(d['index'])+' '+d['name'],'；'.join(k+'='+str(v) for k,v in d['plan_range']['parameters'].items())+' '+d['plan_range']['unit'],'；'.join(k+'：'+v for k,v in d['plan_range']['evidence'].items()),d['plan_range']['coordinate_basis']+'；原件：'+d['plan_range']['coordinate_evidence_id']+'；校验：'+d['plan_frame_hash']] for t,d in rows]),
         (WINDOW_TITLES[3],['模板 / 两窗口','X / Y有向间隔（m）','状态及重复检查口径'],[
-            [t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],('精确有理数竖向扫描；'+str(len(c['partitions']))+'个共同X分段，逐段内部片段无正重叠' if c.get('method')=='simple_polygon_vertical_sweep' else '分离轴('+c['axis_x']+','+c['axis_y']+')；投影间隔='+c['projection_gap']+'m²（未单位化轴）' if c.get('method')=='convex_separating_axis' else c['x_gap']+' / '+c['y_gap']),('分离' if c['state']=='separated' else '共享边界')+('；按完整窗口全部直边交点分段，凹口空区不视作重叠，正重叠或包含拒绝' if c.get('method')=='simple_polygon_vertical_sweep' else '；凸窗口按全部边法向分离轴判定，正重叠拒绝' if c.get('method')=='convex_separating_axis' else '；X/Y均正交叠即拒绝，整面与窗口也不能并计')] for t in ts for c in t['horizontal_window_checks']] or [['—','—','无同端面窗口对；已检查整面与窗口不重复']])
+            [t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],('精确有理数竖向扫描；'+str(len(c['partitions']))+'个共同X分段，逐段内部片段无正重叠' if c.get('method') in ('simple_polygon_vertical_sweep','perforated_polygon_vertical_sweep') else '分离轴('+c['axis_x']+','+c['axis_y']+')；投影间隔='+c['projection_gap']+'m²（未单位化轴）' if c.get('method')=='convex_separating_axis' else c['x_gap']+' / '+c['y_gap']),('分离' if c['state']=='separated' else '共享边界')+('；按完整窗口全部直边交点分段，凹口空区不视作重叠，正重叠或包含拒绝' if c.get('method') in ('simple_polygon_vertical_sweep','perforated_polygon_vertical_sweep') else '；凸窗口按全部边法向分离轴判定，正重叠拒绝' if c.get('method')=='convex_separating_axis' else '；X/Y均正交叠即拒绝，整面与窗口也不能并计')] for t in ts for c in t['horizontal_window_checks']] or [['—','—','无同端面窗口对；已检查整面与窗口不重复']])
     ])
     curves=[(t,d,'下层与窗口' if d['face']=='step' else '端层截面',d['window_lower_area'] if d['face']=='step' else d['single_gross_area'],d['window_curved_intersection']) for t,d in rows if d.get('window_curved_intersection')]
     curves += [(t,d,('上层窗口内孔H' if d['face']=='step' else '实际孔H')+str(h['hole_index']),h['covered_area'] if d['face']=='step' else h.get('window_direct_area',h['single_area']),h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
@@ -152,6 +152,7 @@ def tables(snapshot):
     result=hole_end_window_tables(snapshot,coverage_tables(snapshot,result))
     result=polygon_window_tables(snapshot,result)
     result=simple_window_check_tables(snapshot,polygon_window_tables(snapshot,result,simple=True))
+    result=perforated_window_tables(snapshot,result)
     if not rows:return result
     result.append((ROUND_WINDOW_TITLE,['模板 / 平台窗口 / 孔','区间 / X起止（m）','有效上边界 / 下边界','区间共同面积（m²）','共同交集及精度'],[
         [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index']),q['name']+' / '+q['x_from']+'至'+q['x_to'],q['upper_boundary']+' / '+q['lower_boundary'],q['area'],h['covered_area']+'；'+m['integration_rule']+'；工作200位、保留80位、固定π见规则'] for t,d,h,m in rows for q in m['terms']]))
@@ -163,12 +164,19 @@ SIMPLE_POLYGON_TITLES = ('基础凹窗口顶点','基础凹窗口分段积分','
 SIMPLE_CHECK_TITLE = '基础凹窗口防重分段'
 
 
-def polygon_window_tables(snapshot,result,simple=False):
-    titles=SIMPLE_POLYGON_TITLES if simple else POLYGON_TITLES
-    rows=[(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d.get('polygon_window') and bool(d.get('simple_polygon_window'))==simple]
+def polygon_window_tables(snapshot,result,simple=False,perforated=False):
+    titles=PERFORATED_TITLES if perforated else SIMPLE_POLYGON_TITLES if simple else POLYGON_TITLES
+    rows=[(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d.get('polygon_window') and bool(d.get('perforated_polygon_window'))==perforated and (perforated or bool(d.get('simple_polygon_window'))==simple)]
     if not rows:return result
-    result.append((titles[0],['模板 / 范围','顶点 / 原始XY及单位','规范XY（m）','逐坐标原件 / 共同基准'],[
-        [t['name']+' / C'+str(d['index'])+' '+d['name'],'P'+str(i)+' / '+str(d['plan_range']['parameters']['x'+str(i)])+'，'+str(d['plan_range']['parameters']['y'+str(i)])+' '+d['plan_range']['unit'],v['x']+' / '+v['y'],d['plan_range']['evidence']['x'+str(i)]+' / '+d['plan_range']['evidence']['y'+str(i)]+'；'+d['plan_range']['coordinate_basis']+'；'+d['plan_range']['coordinate_evidence_id']] for t,d in rows for i,v in enumerate(d['window_vertices'],1)]))
+    if perforated:
+        result.append((titles[0],['模板 / 范围 / 轮廓','顶点 / 原始XY及单位','规范XY（m）','逐坐标原件 / 排除说明及原件'],[
+            [t['name']+' / C'+str(d['index'])+' / '+('外轮廓' if ring['index']==0 else 'W'+str(ring['index'])+' '+ring['name']),
+             'P'+str(i)+' / '+str(config['parameters']['x'+str(i)])+'，'+str(config['parameters']['y'+str(i)])+' '+d['plan_range']['unit'],
+             v['x']+' / '+v['y'],config['evidence']['x'+str(i)]+' / '+config['evidence']['y'+str(i)]+'；'+(config['measurement_basis']+'；'+config['evidence_id'] if ring['index'] else d['plan_range']['coordinate_basis']+'；'+d['plan_range']['coordinate_evidence_id'])]
+            for t,d in rows for ring in d['window_rings'] for config in [d['plan_range'] if ring['index']==0 else d['plan_range']['holes'][ring['index']-1]] for i,v in enumerate(ring['vertices'],1)]))
+    else:
+        result.append((titles[0],['模板 / 范围','顶点 / 原始XY及单位','规范XY（m）','逐坐标原件 / 共同基准'],[
+            [t['name']+' / C'+str(d['index'])+' '+d['name'],'P'+str(i)+' / '+str(d['plan_range']['parameters']['x'+str(i)])+'，'+str(d['plan_range']['parameters']['y'+str(i)])+' '+d['plan_range']['unit'],v['x']+' / '+v['y'],d['plan_range']['evidence']['x'+str(i)]+' / '+d['plan_range']['evidence']['y'+str(i)]+'；'+d['plan_range']['coordinate_basis']+'；'+d['plan_range']['coordinate_evidence_id']] for t,d in rows for i,v in enumerate(d['window_vertices'],1)]))
     traces=[(t,d,'窗口实际毛交集',d['polygon_gross_trace']) for t,d in rows]
     traces += [(t,d,'逐孔实际扣减H'+str(h['hole_index']),h.get('polygon_cut_trace',h['curved_intersection'])) for t,d in rows for h in d['apertures']]
     traces += [(t,d,'直接净接触校验',d['polygon_net_trace']) for t,d in rows]
@@ -212,10 +220,26 @@ def hole_end_window_tables(snapshot,result):
     return result
 
 
-def simple_window_check_tables(snapshot,result):
-    rows=[(t,c) for t in snapshot['takeoffs'] for c in t.get('horizontal_window_checks',[]) if c.get('method')=='simple_polygon_vertical_sweep']
-    if rows:result.append((SIMPLE_CHECK_TITLE,['模板 / 窗口对','X起止 / 中点（m，精确有理数）','左窗口内部Y片段（m）','右窗口内部Y片段（m）','防重结论'],[
+def simple_window_check_tables(snapshot,result,perforated=False):
+    method='perforated_polygon_vertical_sweep' if perforated else 'simple_polygon_vertical_sweep'
+    rows=[(t,c) for t in snapshot['takeoffs'] for c in t.get('horizontal_window_checks',[]) if c.get('method')==method]
+    if rows:result.append((PERFORATED_CHECK_TITLE if perforated else SIMPLE_CHECK_TITLE,['模板 / 窗口对','X起止 / 中点（m，精确有理数）','左窗口内部Y片段（m）','右窗口内部Y片段（m）','防重结论'],[
         [t['name']+' / C'+str(c['left_index'])+' / C'+str(c['right_index']),q['x_from']+'至'+q['x_to']+'；'+q['x_mid'],
          '；'.join(lo+'至'+hi for lo,hi in q['left']),'；'.join(lo+'至'+hi for lo,hi in q['right']),
          ('共享边界' if c['state']=='boundary_touch' else '分离')+'；内部片段无正重叠；完整窗口检查，不按实体或孔投影豁免'] for t,c in rows for q in (c['partitions'] or [dict(x_from='—',x_to='—',x_mid='无共同X内部区间',left=[],right=[])])]))
     return result
+
+
+PERFORATED_TITLES = ('基础带孔窗口顶点','基础带孔窗口分段积分','基础带孔窗口零接触校验')
+PERFORATED_NET_TITLE = '基础带孔窗口净区与校验'
+PERFORATED_CHECK_TITLE = '基础带孔窗口防重分段'
+
+
+def perforated_window_tables(snapshot,result):
+    result=polygon_window_tables(snapshot,result,perforated=True)
+    rows=[(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d.get('perforated_polygon_window')]
+    if rows:result.append((PERFORATED_NET_TITLE,['模板 / 范围','外轮廓 / 窗口内孔 / 窗口净面积（m²）','逐轮廓面积及拓扑校验','计量边界'],[
+        [t['name']+' / C'+str(d['index']),d['window_outer_area']+' / '+d['window_exclusion_area']+' / '+d['window_area'],
+         '；'.join(('外轮廓' if ring['index']==0 else 'W'+str(ring['index'])+' '+ring['name'])+'='+ring['area'] for ring in d['window_rings'])+'；'+'；'.join(c['left']+' / '+c['right']+'：'+('严格在内' if c['relation']=='strictly_inside' else '相互分离') for c in d['window_ring_checks']),
+         '窗口内孔W仅排除本项支模，非基础实体孔H，不扣混凝土或生成孔壁；先取窗口净区，再与真实接触相交及扣实际孔。全部个数继承一次；完整公式AST见JSON'] for t,d in rows]))
+    return simple_window_check_tables(snapshot,result,perforated=True)

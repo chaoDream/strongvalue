@@ -56,12 +56,14 @@ def spans(poly,x):
     return list(zip(ys[::2],ys[1::2]))
 
 
-def separation(a,b):
+def separation(a,b,ring_points=None,method='simple_polygon_vertical_sweep'):
     """Exact positive-area overlap test, including containment and concave bays."""
-    pa,pb=([tuple(map(Fraction,p)) for p in points(d)] for d in (a,b))
+    ra,rb=([[tuple(map(Fraction,p)) for p in ring] for ring in (ring_points(d) if ring_points else [points(d)])] for d in (a,b))
+    pa,pb=([p for ring in rs for p in ring] for rs in (ra,rb))
+    ea,eb=([edge for ring in rs for edge in edges(ring)] for rs in (ra,rb))
     cuts={p[0] for p in pa+pb}
-    for p,q in edges(pa):
-        for P,Q in edges(pb):
+    for p,q in ea:
+        for P,Q in eb:
             u=(q[0]-p[0],q[1]-p[1]);v=(Q[0]-P[0],Q[1]-P[1]);den=u[0]*v[1]-u[1]*v[0]
             if not den:continue
             t=((P[0]-p[0])*v[1]-(P[1]-p[1])*v[0])/den
@@ -69,13 +71,16 @@ def separation(a,b):
             if 0<=t<=1 and 0<=s<=1:cuts.add(p[0]+t*u[0])
     partitions=[];xs=sorted(cuts)
     for lo,hi in zip(xs,xs[1:]):
-        mid=(lo+hi)/2;left,right=spans(pa,mid),spans(pb,mid)
+        def interior(rings):
+            ys=sorted(y for ring in rings for pair in spans(ring,mid) for y in pair)
+            return list(zip(ys[::2],ys[1::2]))
+        mid=(lo+hi)/2;left,right=interior(ra),interior(rb)
         if any(max(l,L)<min(h,H) for l,h in left for L,H in right):return dict(overlap=True)
         if left and right:
             partitions.append(dict(x_from=rational(lo),x_to=rational(hi),x_mid=rational(mid),
                                    left=[[rational(v) for v in pair] for pair in left],right=[[rational(v) for v in pair] for pair in right]))
-    touching=any(intersects(p,q,P,Q) for p,q in edges(pa) for P,Q in edges(pb))
-    return dict(overlap=False,state='boundary_touch' if touching else 'separated',method='simple_polygon_vertical_sweep',
+    touching=any(intersects(p,q,P,Q) for p,q in ea for P,Q in eb)
+    return dict(overlap=False,state='boundary_touch' if touching else 'separated',method=method,
                 rational_unit='m',partitions=partitions,formula_asts={})
 
 

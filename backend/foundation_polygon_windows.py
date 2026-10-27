@@ -92,7 +92,7 @@ def separation(a, b):
 
 
 class PolygonScene(Scene):
-    def __init__(self, profiles, pts, bind):
+    def __init__(self, profiles, pts, bind, rings=None):
         self.pts = pts
         self.bind = bind
         xs, ys = [p[0] for p in pts], [p[1] for p in pts]
@@ -101,11 +101,14 @@ class PolygonScene(Scene):
         self.cuts={v:bind(n) for v,n in self.cuts.items()}
         self.edges = []
         equations = []
-        for i, ((x,y), (X,Y)) in enumerate(zip(pts, pts[1:]+pts[:1]), 1):
+        segments = [(i, a, b) for i,(a,b) in enumerate(zip(pts,pts[1:]+pts[:1]),1)] if rings is None else [
+            (('外轮廓' if ri==0 else '内孔W'+str(ri))+'边'+str(i),a,b)
+            for ri,ring in enumerate(rings) for i,(a,b) in enumerate(zip(ring,ring[1:]+ring[:1]),1)]
+        for i,(x,y),(X,Y) in segments:
             self.add(x)
             if x.v == X.v: continue
             m = bind((Y-y)/(X-x)); intercept = bind(y-m*x)
-            self.edges.append((min(x.v,X.v), max(x.v,X.v), ('slope','窗口边'+str(i), (m,intercept), 1)))
+            self.edges.append((min(x.v,X.v), max(x.v,X.v), ('slope',('窗口边'+str(i)) if rings is None else str(i), (m,intercept), 1)))
             equations.append((bind(y-Y),bind(X-x),bind(x*Y-X*y),[(x,y),(X,Y)]))
         equations += [(N(0),N(1),N(0)-p[k],[]) for p in profiles if 'circle' not in p for k in ('bottom','top')]
         for p in profiles:
@@ -193,13 +196,22 @@ class PolygonScene(Scene):
                    working_digits=PRECISION,output_digits=80,pi_constant=PI,terms=terms,**({'partitions':partitions} if certify else {}))
 
 
-def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions,scene_type=PolygonScene):
+def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions,scene_type=PolygonScene,inner_rings=()):
     c = d['plan_range']; nodes = {}
     for k in keys(c):
         dimensions[key+'.'+k] = str(c['parameters'][k]); refs[key+'.'+k] = c['evidence'][k]
         nodes[k] = op('multiply',{'dimension':key+'.'+k},{'constant':LENGTH[c['unit']]})
         conversions.append(dict(parameter=key+'.'+k,original_value=str(c['parameters'][k]),source_unit=c['unit'],factor=LENGTH[c['unit']],canonical_value=str(linear(c['parameters'][k],c['unit'])),canonical_unit='m',rule_version=UNIT_VERSION))
     refs[key+'.plan_coordinate'] = c['coordinate_evidence_id']
+    inner_nodes=[]
+    for i,ring in enumerate(inner_rings,1):
+        ring_key=key+'.window_holes.'+str(i); rn={}
+        refs[ring_key+'.basis']=ring['evidence_id']
+        for k in keys(ring):
+            name=ring_key+'.'+k; dimensions[name]=str(ring['parameters'][k]);refs[name]=ring['evidence'][k]
+            rn[k]=op('multiply',{'dimension':name},{'constant':LENGTH[c['unit']]})
+            conversions.append(dict(parameter=name,original_value=dimensions[name],source_unit=c['unit'],factor=LENGTH[c['unit']],canonical_value=str(linear(ring['parameters'][k],c['unit'])),canonical_unit='m',rule_version=UNIT_VERSION))
+        inner_nodes.append(rn)
     with localcontext() as ctx:
         ctx.prec = PRECISION; ctx.rounding = ROUND_HALF_EVEN
         definitions=[]; expressions={}
@@ -218,6 +230,18 @@ def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions
             window = window+(a[0]-origin[0])*(b[1]-origin[1])-(a[1]-origin[1])*(b[0]-origin[0])
         window = window/N(2)
         if window.v < 0: window = N(0)-window
+        all_points=[pts]; ring_rows=[]; outer_window=window; hole_window=N(0)
+        if inner_rings:
+            ring_rows.append(dict(index=0,name='外轮廓',role='outer',area=str(value(window)),formula_ast=ast(window),vertices=[dict(x=str(value(x)),y=str(value(y))) for x,y in pts]))
+            for ri,(ring,rn) in enumerate(zip(inner_rings,inner_nodes),1):
+                points=[(N(x,rn['x'+str(i)]),N(y,rn['y'+str(i)])) for i,(x,y) in enumerate(vertices({**ring,'unit':c['unit']}),1)]
+                origin=points[0];area=N(0)
+                for a,b in zip(points[1:-1],points[2:]):area=area+(a[0]-origin[0])*(b[1]-origin[1])-(a[1]-origin[1])*(b[0]-origin[0])
+                area=area/N(2)
+                if area.v<0:area=N(0)-area
+                hole_window=hole_window+area;all_points.append(points)
+                ring_rows.append(dict(index=ri,name=ring['name'],role='window_hole',area=str(value(area)),formula_ast=ast(area),vertices=[dict(x=str(value(x)),y=str(value(y))) for x,y in points]))
+            window=outer_window-hole_window
         cp,ca,_,_ = steps.section(item,tier) if 'foundation_levels' in item else ends.single_section(item,tier)
         layer = profile(cp,ca,'混凝土侧层' if d['face'] in ends.FACES else '端层')
         include = [layer]; exclude = []
@@ -227,7 +251,8 @@ def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions
         if d['face'] == 'step':
             up,ua,_,_ = steps.section(item,layers(item)[d['level_index']])
             exclude = [profile(up,ua,'上层完整截面')]
-        def measure(inc, exc=()): return scene_type(inc+list(exc),pts,bind).measure(inc,exc)
+        def scene(profiles): return scene_type(profiles,pts,bind,**({'rings':all_points} if inner_rings else {}))
+        def measure(inc, exc=()): return scene(inc+list(exc)).measure(inc,exc)
         gross,node,trace = measure(include,exclude)
         hole_profiles = []
         for h in holes:
@@ -252,7 +277,7 @@ def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions
                 q.update(full_end_intersection_area=h['single_area'],window_direct_area=str(amount))
                 q['formula_asts'].update(full_end_intersection_area=h['formula_ast'],window_direct_area=an)
             clipped.append(q)
-        net_scene=scene_type(include+exclude+hole_profiles,pts,bind)
+        net_scene=scene(include+exclude+hole_profiles)
         direct_net,net_node,net_trace = net_scene.measure(include,exclude+hole_profiles,certify=True)
         zero_proof = None
         if gross > 0 and not net_trace['terms'] and clipped:
@@ -277,6 +302,9 @@ def geometry(d,item,tier,original,full_ast,holes,key,dimensions,refs,conversions
                      window_expression_definitions=definitions,
                      plan_frame_hash=store.digest(dict(basis=c['coordinate_basis'].strip(),evidence_id=c['coordinate_evidence_id'].strip())))
         if zero_proof: extra['polygon_zero_contact'] = zero_proof
+        if inner_rings:
+            extra.update(window_rings=ring_rows,window_outer_area=str(value(outer_window)),window_exclusion_area=str(value(hole_window)))
+            ast_bounds.update(window_outer_area=ast(outer_window),window_exclusion_area=ast(hole_window))
         if d['face'] in ends.FACES: extra['hole_end_window'] = True
         if d['face'] == 'step':
             lo,ln,lt = measure(include); up,un,ut = measure(include+exclude)
