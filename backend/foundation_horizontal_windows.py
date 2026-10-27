@@ -23,10 +23,15 @@ def enabled(d):return isinstance(d,dict) and 'plan_range' in d
 
 
 def bounds(d):
+    from . import foundation_polygon_windows as polygon
+    if polygon.enabled(d): return polygon.bounds(d)
     c=d['plan_range'];return tuple(linear(c['parameters'][k],c['unit']) for k in FIELDS)
 
 
 def validate_config(c):
+    from . import foundation_polygon_windows as polygon
+    if polygon.enabled(dict(plan_range=c)):
+        polygon.validate(c); return
     if not isinstance(c,dict) or set(c)!={'parameters','unit','evidence','coordinate_basis','coordinate_evidence_id','scope_confirmed'} or not isinstance(c['parameters'],dict) or set(c['parameters'])!=set(FIELDS) or not isinstance(c['evidence'],dict) or set(c['evidence'])!=set(FIELDS):
         raise DomainError('水平窗口须完整填写XY起止坐标、长度单位、逐坐标原件、共同局部坐标基准及确认，不能用面积或比例代替')
     x1,x2,y1,y2=bounds(dict(plan_range=c))
@@ -50,6 +55,8 @@ def check_frames(rows,others,conflict=False):
 
 def overlaps(a,b):
     if not (enabled(a) and enabled(b)):return True
+    from . import foundation_polygon_windows as polygon
+    if polygon.enabled(a) or polygon.enabled(b):return polygon.separation(a,b)['gap'] < 0
     ax,ae,ay,af=bounds(a);bx,be,by,bf=bounds(b)
     return max(ax,bx)<min(ae,be) and max(ay,by)<min(af,bf)
 
@@ -89,6 +96,13 @@ def checks(rows):
             if not enabled(b) or a['material_index']!=b['material_index'] or a['face']!=b['face']:continue
             if a['face']=='step' and a['level_index']!=b['level_index']:continue
             if a['face'] in ('hole_bottom','hole_top') and a['hole_index']!=b['hole_index']:continue
+            from . import foundation_polygon_windows as polygon
+            if polygon.enabled(a) or polygon.enabled(b):
+                s=polygon.separation(a,b)
+                result.append(dict(left_index=b['index'],right_index=a['index'],left=b['name'],right=a['name'],
+                    state='separated' if s['gap']>0 else 'boundary_touch',method='convex_separating_axis',
+                    axis_x=str(s['axis'][0]),axis_y=str(s['axis'][1]),projection_gap=str(s['gap']),formula_asts={}))
+                continue
             values={};nodes={}
             for axis in ('x','y'):
                 al,ah=(Decimal(a['plan_bounds'][axis+'_'+k]) for k in ('start','end'));bl,bh=(Decimal(b['plan_bounds'][axis+'_'+k]) for k in ('start','end'))

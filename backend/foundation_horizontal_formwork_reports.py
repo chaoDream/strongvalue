@@ -104,7 +104,7 @@ def window_tables(snapshot):
         (WINDOW_TITLES[2],['模板 / 窗口','原始坐标及单位','逐坐标原件','共用基础XY基准及原件'],[
             [t['name']+' / C'+str(d['index'])+' '+d['name'],'；'.join(k+'='+str(v) for k,v in d['plan_range']['parameters'].items())+' '+d['plan_range']['unit'],'；'.join(k+'：'+v for k,v in d['plan_range']['evidence'].items()),d['plan_range']['coordinate_basis']+'；原件：'+d['plan_range']['coordinate_evidence_id']+'；校验：'+d['plan_frame_hash']] for t,d in rows]),
         (WINDOW_TITLES[3],['模板 / 两窗口','X / Y有向间隔（m）','状态及重复检查口径'],[
-            [t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],c['x_gap']+' / '+c['y_gap'],('分离' if c['state']=='separated' else '共享边界')+'；X/Y均正交叠即拒绝，整面与窗口也不能并计'] for t in ts for c in t['horizontal_window_checks']] or [['—','—','无同端面窗口对；已检查整面与窗口不重复']])
+            [t['name']+' / C'+str(c['left_index'])+' '+c['left']+' / C'+str(c['right_index'])+' '+c['right'],('分离轴('+c['axis_x']+','+c['axis_y']+')；投影间隔='+c['projection_gap']+'m²（未单位化轴）' if c.get('method')=='convex_separating_axis' else c['x_gap']+' / '+c['y_gap']),('分离' if c['state']=='separated' else '共享边界')+('；凸窗口按全部边法向分离轴判定，正重叠拒绝' if c.get('method')=='convex_separating_axis' else '；X/Y均正交叠即拒绝，整面与窗口也不能并计')] for t in ts for c in t['horizontal_window_checks']] or [['—','—','无同端面窗口对；已检查整面与窗口不重复']])
     ])
     curves=[(t,d,'下层与窗口' if d['face']=='step' else '端层截面',d['window_lower_area'] if d['face']=='step' else d['single_gross_area'],d['window_curved_intersection']) for t,d in rows if d.get('window_curved_intersection')]
     curves += [(t,d,('上层窗口内孔H' if d['face']=='step' else '实际孔H')+str(h['hole_index']),h['covered_area'] if d['face']=='step' else h.get('window_direct_area',h['single_area']),h['curved_intersection']) for t,d in rows for h in d['apertures'] if h.get('curved_intersection')]
@@ -150,9 +150,31 @@ def tables(snapshot):
     result=step_window_tables(snapshot)
     rows=[(t,d,h,h['curved_intersection']) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d.get('round_step_window') for h in d['apertures'] if h.get('curved_intersection',{}).get('integration_rule')]
     result=hole_end_window_tables(snapshot,coverage_tables(snapshot,result))
+    result=polygon_window_tables(snapshot,result)
     if not rows:return result
     result.append((ROUND_WINDOW_TITLE,['模板 / 平台窗口 / 孔','区间 / X起止（m）','有效上边界 / 下边界','区间共同面积（m²）','共同交集及精度'],[
         [t['name']+' / C'+str(d['index'])+' / H'+str(h['hole_index']),q['name']+' / '+q['x_from']+'至'+q['x_to'],q['upper_boundary']+' / '+q['lower_boundary'],q['area'],h['covered_area']+'；'+m['integration_rule']+'；工作200位、保留80位、固定π见规则'] for t,d,h,m in rows for q in m['terms']]))
+    return result
+
+
+POLYGON_TITLES = ('基础凸窗口顶点','基础凸窗口分段积分','基础凸窗口零接触校验')
+
+
+def polygon_window_tables(snapshot,result):
+    rows=[(t,d) for t in snapshot['takeoffs'] if t.get('horizontal_formwork_summary') for d in t['contact_ranges'] if d.get('polygon_window')]
+    if not rows:return result
+    result.append((POLYGON_TITLES[0],['模板 / 范围','顶点 / 原始XY及单位','规范XY（m）','逐坐标原件 / 共同基准'],[
+        [t['name']+' / C'+str(d['index'])+' '+d['name'],'P'+str(i)+' / '+str(d['plan_range']['parameters']['x'+str(i)])+'，'+str(d['plan_range']['parameters']['y'+str(i)])+' '+d['plan_range']['unit'],v['x']+' / '+v['y'],d['plan_range']['evidence']['x'+str(i)]+' / '+d['plan_range']['evidence']['y'+str(i)]+'；'+d['plan_range']['coordinate_basis']+'；'+d['plan_range']['coordinate_evidence_id']] for t,d in rows for i,v in enumerate(d['window_vertices'],1)]))
+    traces=[(t,d,'窗口实际毛交集',d['polygon_gross_trace']) for t,d in rows]
+    traces += [(t,d,'逐孔实际扣减H'+str(h['hole_index']),h.get('polygon_cut_trace',h['curved_intersection'])) for t,d in rows for h in d['apertures']]
+    traces += [(t,d,'直接净接触校验',d['polygon_net_trace']) for t,d in rows]
+    result.append((POLYGON_TITLES[1],['模板 / 范围 / 对象','X起止（m）','有效下界 / 上界','分段面积（m²）','规则'],[
+        [t['name']+' / C'+str(d['index'])+' / '+label,q['x_from']+'至'+q['x_to'],q['lower_boundary']+' / '+q['upper_boundary'],q['area'],m['integration_rule']+'；200位工作/80位保留；公式AST见JSON'] for t,d,label,m in traces for q in m['terms']] or [['—','—','—','0','无正面积分段']]))
+    proofs=[(t,d,d['polygon_zero_contact']) for t,d in rows if d.get('polygon_zero_contact')]
+    if proofs:result.append((POLYGON_TITLES[2],['模板 / 范围','区间X起止 / 中点（m）','毛接触下界 / 上界（m）','覆盖轮廓及中点上下界（m）','完整覆盖及分割余项'],[
+        [t['name']+' / C'+str(d['index']),q['x_from']+'至'+q['x_to']+'；中点'+q['x_mid'],q['included']['lower']+' / '+q['included']['upper'],
+         '；'.join(v['profile']+'；'+v['lower_boundary']+'至'+v['upper_boundary']+'：'+v['lower']+' / '+v['upper'] for v in q['excluded']),
+         m['method']+'；本区间剩余'+str(len(q['remaining']))+'段；H'+str(m['canonical_hole_index'])+'=毛−其他孔扣；直接净='+d['polygon_direct_net_area']] for t,d,m in proofs for q in m['net_trace']['partitions']]))
     return result
 
 
