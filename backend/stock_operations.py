@@ -14,7 +14,7 @@ NOTICE = ('整单领料仅从当前有效已审预留建立；提交及复核均
           '领料将预留转成出库，不增加可用库存；同材料表已领料后不能二次预留。投入加工和退回按已执行领料的逐项未加工余额记录，可分批但不得超量。'
           '投入加工按完整原材根数退出完整根台账，不代表净安装工程量或加工损耗；加工后的余料不能当作完整原材退回。'
           '来源修订、原件失效或审批问题不撤销既有实物记账；新领料阻断，已执行领料的后续实际加工／完整退回可凭当前有效交接原件记录，历史问题另行警示。'
-          '已执行单据不可取消或重审；未执行单据可有据取消。余料回用及未加工原段退回须走各自独立入口；尚不支持领料拆单、实物盘点调整、跨项目共享或采购闭环；不改净工程量、排料或报价。')
+          '已执行单据不可取消或重审；未执行单据可有据取消。余料回用及未加工原段退回须走各自独立入口；完整原材在库盘点须走独立盘点入口；尚不支持领料拆单、在外或已加工盘点、跨项目共享或采购闭环；不改净工程量、排料或报价。')
 
 
 def execution(p, oid):
@@ -45,11 +45,25 @@ def totals(rows):
 
 def balances(p):
     """Replay executed movements only. A failed current proof never credits stock back."""
-    stock = {r['id']: dict(issued=0, returned=0, consumed=0) for r in p['stock_receipts']}
-    issues = {}; reservations = set(); applied = set()
+    from . import stock_counts as counts
+    stock = {r['id']: dict(issued=0, returned=0, consumed=0,adjustment_gain=0,adjustment_loss=0,count_revision=0) for r in p['stock_receipts']}
+    issues = {}; reservations = set(); applied = set(); stopped=set()
     ops = {r['id']: r for r in p['stock_operations']}
     for event in p['stock_events']:
         kind = event['operation']
+        if kind=='void':stopped.add(event['target_id'])
+        if kind in ('stock_count','stock_count_cancel'):
+            row=next((r for r in p[counts.COLLECTION] if r['id']==event['target_id']),None)
+            if not row or row['id'] in applied or event.get('record_hash')!=store.digest(row):inv.fail('完整原材盘点事件或单据关联无法核验')
+            inv.intact(row);inv.intact(event);applied.add(row['id'])
+            if kind=='stock_count_cancel':continue
+            receipt=next((r for r in p['stock_receipts'] if r['id']==row.get('receipt_id')),None)
+            if not receipt or receipt['id'] in stopped:inv.fail('完整原材盘点来源缺失或晚于停用')
+            if not inv.approved(p,counts.COLLECTION,row):inv.fail('已执行盘点缺少匹配的独立复核')
+            n=stock[receipt['id']];computed=counts.normalize(row['input'],receipt,n)
+            if any(row.get(k)!=v for k,v in computed.items()) or any(event.get(k)!=row[k] for k in ('receipt_id','before','after','delta','length_delta','mass_delta')):inv.fail('完整原材实盘、差异或冻结事件无法核验')
+            n['adjustment_gain']+=max(0,row['delta']);n['adjustment_loss']+=max(0,-row['delta']);n['count_revision']+=1
+            continue
         if kind not in KINDS:
             continue
         row = ops.get(event['target_id'])
@@ -76,10 +90,13 @@ def balances(p):
                 if not parent or any(parent[k] != a[k] for k in a if k != 'quantity') or a['quantity'] > parent['quantity']-parent['consumed']-parent['returned']:
                     inv.fail('领用记账超过对应批次未加工余额或分配关联异常')
                 parent['consumed' if kind == 'consume' else 'returned'] += a['quantity']
-            stock[a['receipt_id']][{'issue':'issued','consume':'consumed','return':'returned'}[kind]] += a['quantity']
+            n=stock[a['receipt_id']];n[{'issue':'issued','consume':'consumed','return':'returned'}[kind]] += a['quantity']
+            receipt=core.find(p,'stock_receipts',a['receipt_id'])
+            if receipt['normalized']['quantity']+n['adjustment_gain']-n['adjustment_loss']-n['issued']+n['returned']<0:inv.fail('完整原材出库超出当时实际在库根数，不能用后续盘盈补记')
     for rid, n in stock.items():
         n['in_custody'] = n['issued']-n['returned']-n['consumed']
-        count = core.find(p, 'stock_receipts', rid)['normalized']['quantity']
+        count = core.find(p, 'stock_receipts', rid)['normalized']['quantity']+n['adjustment_gain']-n['adjustment_loss']
+        n['adjusted_quantity']=count
         n['on_hand'] = count-n['issued']+n['returned']
         if min(n.values()) < 0 or n['on_hand']+n['in_custody']+n['consumed'] != count:
             inv.fail('完整原材库存、在外及加工根数台账不闭合')
