@@ -21,7 +21,7 @@ from .compound_takeoff import component_quantity, structured_validator, STRUCTUR
 from .parsers import validate_file, extract, fact_candidates, dimension_candidates, pdf_text_anchors, dxf_objects
 from . import facts as project_facts
 
-app = FastAPI(title='QiangQuote 工程智能计价', version='0.130.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
+app = FastAPI(title='QiangQuote 工程智能计价', version='0.131.0', description='原图证据、受控算量、清单组价、变更对账；模型服务可配置，专业软件接入待授权验证。')
 store.init()
 ROLES = {'manager', 'estimator', 'reviewer', 'admin'}
 REQUIREMENTS = {'建筑': '建筑平面、剖面及做法', '结构': '结构配筋、基础及节点', '工艺设备': '工艺流程、设备表及安装要求',
@@ -92,7 +92,7 @@ def project(c, pid, a):
 
 
 def normalize(p):
-    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes', 'supplier_quote_adoptions', 'supplier_inquiry_reopenings', 'dxf_route_adoptions', 'stock_receipts', 'stock_reservations', 'stock_events', 'stock_operations', 'stock_processing_results', 'stock_offcut_reservations', 'stock_offcut_returns', 'stock_offcut_processing', 'stock_offcut_jobs', 'stock_offcut_counts', 'stock_counts', 'stock_offcut_issues']:
+    for key in ['imports', 'changes', 'applied_changes', 'scenarios', 'catalog', 'dimension_candidates', 'analyses', 'reconciliations', 'price_changes', 'applied_price_changes', 'boq_mappings', 'library_snapshots', 'document_requests', 'pricing_bases', 'quantity_diagnoses', 'quantity_batches', 'resource_substitutions', 'applied_resource_substitutions', 'engineering_structures', 'quota_adoptions', 'enterprise_quota_adoptions', 'engineering_settlements', 'integration_trials', 'drawing_sheets', 'drawing_references', 'supplier_quotes', 'supplier_quote_adoptions', 'supplier_inquiry_reopenings', 'dxf_route_adoptions', 'stock_receipts', 'stock_reservations', 'stock_events', 'stock_operations', 'stock_processing_results', 'stock_offcut_reservations', 'stock_offcut_returns', 'stock_offcut_processing', 'stock_offcut_jobs', 'stock_offcut_counts', 'stock_counts', 'stock_offcut_issues', 'stock_mixed_reservations']:
         p.setdefault(key, [])
     return p
 
@@ -1006,6 +1006,9 @@ def apply_review(c, p, body, a, hash_verified=False):
                 raise HTTPException(409, '预留已领料，仅供追溯，不能重审')
         if event_for(p, 'void' if collection == 'stock_receipts' else 'release', target['id']):
             raise HTTPException(409, '库存登记已停用或预留已释放，仅供追溯')
+    if collection in ('stock_reservations','stock_offcut_reservations'):
+        from .stock_mixed_supply import reviewable as mixed_reviewable
+        mixed_reviewable(p,target)
     approve = body['decision'] == 'approve'
     if approve:
         if collection == 'stock_counts':
@@ -1504,6 +1507,9 @@ app.include_router(stock_replenishments_router)
 
 from .stock_offcut_replenishments import router as stock_offcut_replenishments_router
 app.include_router(stock_offcut_replenishments_router)
+
+from .stock_mixed_supply import router as stock_mixed_supply_router
+app.include_router(stock_mixed_supply_router)
 
 from .report_preview import router as report_preview_router
 app.include_router(report_preview_router)

@@ -1,3 +1,4 @@
+import {MixedSupplyDetails} from './StockMixedSupply';
 import {ReplenishmentDetails} from './StockReplenishments';
 import {OffcutIssueDetails} from './StockOffcutIssues';
 import {OffcutCountDetails,StockCountDetails} from './StockOffcutCounts';
@@ -207,6 +208,7 @@ function App() {
           {collection==='stock_offcut_reservations'&&<OffcutReuseDetails p={p} item={item} sourceLink={evidenceLink}/>}
           {(collection==='stock_processing_results'||collection==='stock_offcut_processing')&&<ProcessingDetails item={item} sourceLink={evidenceLink}/>}
           {collection==='stock_operations'&&<StockOperationDetails item={item} sourceLink={evidenceLink}/>}
+          {collection==='stock_reservations'&&item.mixed_supply&&<MixedSupplyDetails p={p} item={item} sourceLink={evidenceLink}/>}
           {collection==='stock_reservations'&&item.replenishment&&<ReplenishmentDetails p={p} item={item} sourceLink={evidenceLink}/>}
           {collection==='stock_receipts'&&<>{row('库存实物批号',item.input.lot_code)}{row('存放位置',item.input.warehouse)}{row('材质截面',item.input.material_spec)}{row('原始登记',item.input.stock_length+' '+item.input.length_unit+'；'+item.input.unit_weight+' '+item.input.weight_unit+'；'+item.input.quantity+'根')}{row('规范登记',item.normalized.stock_length+' m；'+item.normalized.unit_weight+' kg/m；'+item.normalized.quantity+'根')}{row('登记核查说明',item.input.basis)}{Object.entries(item.input.evidence).map(([k,v])=>row('登记原件 '+stockLabels[k],<>{evidenceLink(String(v))}</>))}</>}
           {collection==='stock_reservations'&&<>{row('排料材料表',item.demand.source_name+' V'+item.demand.source_revision)}{row('实物兼容性与预留范围',item.basis)}{row('原件',<>{evidenceLink(item.evidence_id)}</>)}{item.allocations.map((a:Obj,i:number)=>row('分配 '+(i+1),(item.demand.demands.find((d:Obj)=>d.key===a.demand_key)?.name||'需求已不可用')+'；批次 '+(p?.stock_receipts.find((r:Obj)=>r.id===a.receipt_id)?.input.lot_code||a.receipt_id)+'；'+a.quantity+'根'))}{row('占用规则','提交即占用；待补件、拒绝或来源失效不自动释放。')}</>}

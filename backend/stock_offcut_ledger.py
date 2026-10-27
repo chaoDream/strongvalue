@@ -6,6 +6,8 @@ def replay(p,base_lots):
     from . import stock_offcut_reuse as reuse, stock_offcut_returns as returns, stock_offcut_processing as processing, stock_offcut_jobs as job_module, stock_offcut_counts as counts, stock_offcut_issues as issue_module
     from .stock_replenishments import audit
     audit(p,offcut=True)
+    from .stock_mixed_supply import audit as mixed_audit
+    mixed_audit(p)
     lots=[dict(l) for l in base_lots if l.get('origin')!='offcut_processing'];by_key={l['lot_key']:l for l in lots}
     movements={k:dict(issued_quantity=0,returned_quantity=0,processed_quantity=0,processing_quantity=0,adjustment_gain=0,adjustment_loss=0,count_revision=0) for k in by_key}
     records={r['id']:r for name in (reuse.COLLECTION,returns.COLLECTION,processing.COLLECTION,job_module.COLLECTION,counts.COLLECTION,issue_module.COLLECTION) for r in p[name]}
@@ -97,10 +99,13 @@ def replay(p,base_lots):
                 if original!=reservation['allocations']:inv.fail('原余料预留冻结分配与实际规格不符')
                 allocations,totals=row['allocations'],row['totals'];indexed=reuse.issue_allocations(row)
             else:
-                if 'replenishment' in row:inv.fail('补料预留不得冒充实际余料领用批单')
+                if 'replenishment' in row or 'mixed_supply' in row:inv.fail('供应核定预留不得冒充实际余料领用批单')
                 reservation=row;allocations,totals=reuse.allocation_values(row['demand'],row['input']['allocations'],lots)
                 if allocations!=row['allocations'] or totals!=row['totals'] or any(taken.get(row['id'],{}).values()):inv.fail('整单余料领用重复或覆盖既有分批')
                 indexed={i:a for i,a in enumerate(allocations,1)}
+            if 'mixed_supply' in reservation:
+                from .stock_mixed_supply import reviewed
+                reviewed(p,reservation)
             if 'replenishment' in reservation and reservation['replenishment']['release_id'] not in released_events:inv.fail('余料补料领用早于上游未领释放')
             if reservation['id'] in released or e.get('allocations')!=allocations or e.get('totals')!=totals:inv.fail('余料领用晚于释放或冻结数量不符')
             before=taken.setdefault(reservation['id'],{})

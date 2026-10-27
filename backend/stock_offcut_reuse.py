@@ -13,7 +13,7 @@ COLLECTION = 'stock_offcut_reservations'
 NOTICE = ('仅本项目已验收入库且依据有效的余料，按当前已审材料表的全部定尺需求回用；每段长度和每米质量必须完全相等，材质截面及质量另据原件确认。'
           '须先以实物余料长度核定排料并独立审定，不按总长度折算、拼接或自动替换原排料。保存申请立即预留；拒绝、待补件和来源失效仍占用，须有据释放。'
           '申请含实际交接日期、领用人及原件，独立复核后可首次整单或按独立批单分批领用；本次执行才减少在库和未领占用并增加对应批单在外数量。首次领出后原预留不能重审或整单释放，未领继续占用，可有据释放未领余量；依据失效不回滚实物数量。'
-          '同材料表与完整原材预留互斥，不支持两账混配、同材料表重新全量预留再领、冲销及跨项目调拨；仅已释放未领额可走独立余料补料入口。未加工原段退回及余料实际再加工须走各自独立入口；不改变工程量、排料、报价或既有加工核对额度。')
+          '普通回用与完整原材预留互斥，按定尺联合供应须走独立联合核定入口，不支持用普通申请拼配、同材料表重新全量预留再领、冲销及跨项目调拨；仅已释放未领额可走独立余料补料入口。未加工原段退回及余料实际再加工须走各自独立入口；不改变工程量、排料、报价或既有加工核对额度。')
 
 
 def issued(p,rid):
@@ -64,6 +64,9 @@ def batch_proof_issue(p,rid):
     if 'replenishment' in reservation:
         from .stock_offcut_replenishments import release_proof_issue
         problems.append(release_proof_issue(p,reservation))
+    if 'mixed_supply' in reservation:
+        from .stock_mixed_supply import proof_issue
+        problems.append(proof_issue(p,reservation))
     return '；'.join(v for v in problems if v)
 
 
@@ -140,6 +143,9 @@ def preview_hash(raw, result, stamp):return store.digest(dict(input=raw,result=r
 def validate(p,row,allow_partial=False):
     inv.records(p)
     if (closed(p,row) and not allow_partial) or released(p,row['id']) or not active(p,row):inv.fail('余料回用已领用或释放，不能继续领用或重审')
+    if 'mixed_supply' in row:
+        from .stock_mixed_supply import validate_partition
+        validate_partition(p,row);return
     if 'replenishment' in row:
         from .stock_offcut_replenishments import validate as validate_replenishment
         validate_replenishment(p,row,remaining=allow_partial);return
@@ -207,7 +213,7 @@ def movement(pid:str,rid:str,operation:str,body:dict,a=Depends(core.actor)):
             return old
         row=core.find(p,COLLECTION,rid)
         if body['object_hash']!=store.digest(row):inv.fail('余料回用申请已变化，请刷新核对')
-        if operation=='execute' and 'replenishment' in row:inv.fail('补料核定不代表实际交接，须另建余料分批领用单并独立复核后执行')
+        if operation=='execute' and ('replenishment' in row or 'mixed_supply' in row):inv.fail('补料核定不代表实际交接，须另建余料分批领用单并独立复核后执行')
         if operation!='release-remaining' and closed(p,row):inv.fail('余料回用已领用或释放，不能再次整单执行或释放')
         if operation=='release-remaining':
             from .stock_processing_results import balances as raw_balances

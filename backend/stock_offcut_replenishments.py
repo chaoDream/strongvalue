@@ -18,6 +18,9 @@ NOTICE=('仅余料预留分批领用后已显式释放的未领余量，可在�
 
 def current_demand(p,row):
     """Compare the original full plan, then return this row's frozen reduced demand."""
+    if 'mixed_supply' in row:
+        from .stock_mixed_supply import current_demand
+        return current_demand(p,row)
     if 'replenishment' not in row:return inv.demands(p,row['source_id'])
     demand,chain=frozen(p,row,offcut=True);root=core.find(p,reuse.COLLECTION,chain[0])
     if inv.demands(p,row['source_id'])!=root['demand']:inv.fail('原材料表或完整排料需求已变化，不能按旧余量补料')
@@ -40,7 +43,9 @@ def entitlement(p,parent_id,exclude=''):
     from .stock_processing_results import balances
     from .stock_offcut_ledger import replay
     _,lots=balances(p);replay(p,lots)
-    parent=core.find(p,reuse.COLLECTION,parent_id);event=inv.event_for(p,'offcut_release_remaining',parent_id)
+    parent=core.find(p,reuse.COLLECTION,parent_id)
+    if 'mixed_supply' in parent:inv.fail('联合供应预留暂不支持补料，不能单侧重新取额')
+    event=inv.event_for(p,'offcut_release_remaining',parent_id)
     if not event:inv.fail('须选择本项目已分批领用并显式释放未领余量的余料预留')
     meta=dict(parent_id=parent['id'],parent_hash=store.digest(parent),release_id=event['id'],release_hash=store.digest(event))
     provisional=inv.seal(dict(id='new:'+parent['id'],source_id=parent['source_id'],demand=parent['demand'],replenishment=meta))

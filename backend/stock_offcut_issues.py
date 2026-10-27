@@ -13,7 +13,7 @@ NOTICE=('仅从本项目当前有效已审余料预留，按原分配序号登�
         '每批原段退回、本批领用及再加工须引用本批单及原分配序号，不借用其他批次或未领余额。'
         '已领批单不能取消或重审；原预留首次领出后不能重审、整单领用或整单释放，可有据释放未领余量，不退回已领数量，也不重开全量需求；已释放未领额补料须走独立余料补料入口。'
         '来源失效保留已领事实及未领占用，新领用阻断；历史交接原件失效提示待核查，实际后续交接仍须有效新原件。'
-        '仅完整原段按核定定尺交接，不自动替换排料、混配完整原材、采购或跨项目调拨。')
+        '仅完整原段按核定定尺交接，不自动替换排料；原材余料联合供应须走独立核定入口、实际分账领用；不做采购或跨项目调拨。')
 
 
 def closed(p,row):return inv.event_for(p,'offcut_partial_issue',row['id']) or inv.event_for(p,'offcut_partial_cancel',row['id'])
@@ -55,6 +55,9 @@ def prepare(p,raw):
     inv.records(p);result=normalize(p,raw);source=core.find(p,reuse.COLLECTION,result['reservation_id'])
     if not inv.approved(p,reuse.COLLECTION,source):inv.fail('原余料预留须有效独立复核后才能分批领用')
     reuse.validate(p,source,allow_partial=True)
+    if 'mixed_supply' in source:
+        from .stock_mixed_supply import reviewed
+        reviewed(p,source)
     left={a['allocation_index']:a['remaining'] for a in reuse.progress(p,source)}
     if any(a['quantity']>left[a['allocation_index']] for a in result['allocations']):inv.fail('本批根数超过对应原余料预留未领余额')
     return result,inv.proofs(p,[raw['evidence_id']])

@@ -87,6 +87,8 @@ def balances(p):
     from . import stock_counts as counts
     from .stock_replenishments import audit
     audit(p)
+    from .stock_mixed_supply import audit as mixed_audit
+    mixed_audit(p)
     stock = {r['id']: dict(issued=0, returned=0, consumed=0,adjustment_gain=0,adjustment_loss=0,count_revision=0) for r in p['stock_receipts']}
     issues = {}; reservations = {}; applied = set(); stopped=set(); released=set()
     ops = {r['id']: r for r in p['stock_operations']}
@@ -123,6 +125,9 @@ def balances(p):
         applied.add(row['id'])
         if kind in ISSUE_KINDS:
             rid=row['input']['reference_id'];reservation=core.find(p,'stock_reservations',rid)
+            if 'mixed_supply' in reservation:
+                from .stock_mixed_supply import reviewed
+                reviewed(p,reservation)
             if 'replenishment' in reservation:
                 release_id=reservation['replenishment']['release_id']
                 if not any(x['id']==release_id for x in p['stock_events'][:p['stock_events'].index(event)]):inv.fail('补料领出早于上游未领余量释放')
@@ -189,6 +194,11 @@ def prepare(p, raw):
         if raw['kind']=='issue' and raw['selections'] != []:
             raise HTTPException(422, '整单领料继承预留全部批次及根数，不接受手改分配')
         source, rows = reference_rows(p, raw['reference_id'])
+        if 'mixed_supply' in source:
+            from .stock_mixed_supply import reviewed
+            reviewed(p,source)
+            group=core.find(p,'stock_mixed_reservations',source['mixed_supply']['group_id'])
+            if raw['business_date']<group['input']['business_date']:inv.fail('联合供应实际交接日期不得早于核定日期')
         if raw['kind']=='issue' and issued_reservation(p,source['id']):inv.fail('已有分批领料，请按原预留未领余额继续使用分批入口')
         if raw['kind']=='partial_issue':
             rows=selected_rows(rows,raw['selections']);left={a['allocation_index']:a['remaining'] for a in reservation_progress(p,source)}
