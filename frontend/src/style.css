@@ -2829,3 +2829,5 @@ input::placeholder,textarea::placeholder {
 .procurement-cost-details table {table-layout:fixed;width:100%;min-width:680px;}
 .procurement-cost-details th,.procurement-cost-details td {white-space:normal;overflow-wrap:anywhere;vertical-align:top;}
 .procurement-cost-details button {max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left;}
+.procurement-inventory-panel table {table-layout:fixed;width:100%;min-width:680px;}
+.procurement-inventory-panel th,.procurement-inventory-panel td {white-space:normal;overflow-wrap:anywhere;vertical-align:top;}

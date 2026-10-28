@@ -13,7 +13,7 @@ from .stock_inventory import approved
 router=APIRouter(prefix='/api/v1')
 COLLECTION='procurement_receipts';EVENTS='procurement_receipt_events'
 Short=Annotated[str,StringConstraints(strict=True,strip_whitespace=True,min_length=1,max_length=200)]
-NOTICE='实际到货＝合格＋不合格，数量沿用订单资源原单位。保存及复核不记账，显式执行后合格数量进入独立采购库存，不合格仅列待处置；两者均扣已到货额度，不自动恢复替换额度。采购库存不自动转换为原材根数，不计价、不付款，不自动进入排料；领用、退货、换算和冲销尚不支持。'
+NOTICE='实际到货＝合格＋不合格，数量沿用订单资源原单位。保存及复核不记账，显式执行后合格数量进入独立采购库存，不合格仅列待处置；两者均扣已到货额度，不自动恢复替换额度。采购库存不自动转换为原材根数，不计价、不付款，不自动进入排料；原单位领用另见采购库存领用，不自动计作工程消耗；退回、退货、换算和冲销尚不支持。'
 
 
 class ReceiptIn(BaseModel):
@@ -150,7 +150,9 @@ def prepare(p,raw,exclude=''):
 def validate(p,row):
     intact(row)
     if event_for(p,row['id']):raise HTTPException(409,'采购收货已执行或取消，仅供追溯')
-    if prepare(p,row['input'],row['id'])!=row['result']:raise HTTPException(409,'收货输入、订单审核或原件已变化，请取消后重新建立')
+    # Preserve historical capability copy while revalidating every business field.
+    prepared=prepare(p,row['input'],row['id']);prepared['notice']=row['result']['notice']
+    if prepared!=row['result']:raise HTTPException(409,'收货输入、订单审核或原件已变化，请取消后重新建立')
 
 
 def reviewable(p,row,a):
@@ -188,10 +190,8 @@ def read(pid:str,a=Depends(core.actor)):
         for order in p[orders.COLLECTION]:
             if orders.latest(p,order['input']['requisition_id'])['id']!=order['id']:continue
             view=orders.status(p,order);sources.append(dict(order=order,object_hash=store.digest(order),eligible=view['review_valid'],issue=view['issue'] or ('' if view['review_valid'] else '订单登记尚未有效独立复核'),balance=remaining(p,order),planning_issue=view['planning_issue']))
-        for item in items:
-            if item['phase']!='receive':continue
-            r=item['record'];q=r['result']['quantities']
-            if Decimal(q['accepted_quantity'])>0:lots.append(dict(receipt_id=r['id'],warehouse=r['input']['warehouse'],lot_code=r['input']['lot_code'],resource=r['result']['order']['result']['requisition']['result']['target']['resource'],unit=r['result']['unit'],in_stock_quantity=q['accepted_quantity'],verified=not item['issue'],issue=item['issue']))
+        from .procurement_issues import lots as current_lots
+        lots=current_lots(p)
         return dict(items=items,sources=sources,lots=lots,ledger_hash=ledger_hash(p),notice=NOTICE)
 
 

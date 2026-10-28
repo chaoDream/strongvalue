@@ -75,6 +75,9 @@ def review_batch_targets(pid: str, collection: str, a=Depends(core.actor)):
             from .procurement_requests import cancelled
             from .procurement_orders import summary
             objects = [x for x in objects if not cancelled(p,x['id']) and not summary(p,x['id'])]
+        if collection == 'procurement_issues':
+            from .procurement_issues import event_for
+            objects = [x for x in objects if not event_for(p,x['id'])]
         if collection == 'procurement_receipts':
             from .procurement_receipts import event_for
             objects = [x for x in objects if not event_for(p,x['id'])]
