@@ -120,6 +120,8 @@ def validate(p,row):
 def reviewable(p,row,a):
     records(p)
     if row['author']==a['username']:raise HTTPException(403,'采购订单登记须由非登记人独立复核')
+    from .procurement_receipts import executed_source
+    if executed_source(p,row['id']):raise HTTPException(409,'该订单版本已有实际收货，不能重审；登记信息纠正须追加修订')
     if latest(p,row['input']['requisition_id'])['id']!=row['id']:raise HTTPException(409,'历史订单修订不能重新复核，请核对最新版本')
 
 

@@ -273,6 +273,8 @@ def receipt(pid: str, body: dict, a=Depends(core.actor)):
                 fail('请求标识已用于其他库存操作')
             return old
         values = receipt_values(body['input']); raw = body['input']
+        from .procurement_receipts import claimed
+        if claimed(p,raw['warehouse'],raw['lot_code']):fail('该库位批号已用于采购收货，不能跨台账重复登记或换算为根')
         if any(r['input']['lot_code'].strip() == raw['lot_code'].strip() and r['input']['warehouse'].strip() == raw['warehouse'].strip() and not event_for(p, 'void', r['id']) for r in p['stock_receipts']):
             fail('同仓库同实物批号已登记；修正须先解除全部预留并有据停用原登记，不能重复计入')
         from .stock_processing_results import balances as processing_balances

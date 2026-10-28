@@ -66,6 +66,8 @@ def prepare(p,raw):
             if not job or r['quantity']>job['quantity']-job['accounted']:inv.fail('本次结果超过本投入单已投入且尚未验收余额')
         elif r['quantity']>parent['quantity']-parent['returned']-parent['consumed']-parent['processing']:inv.fail('本次再加工超过对应领用分配尚未加工且未退回余额')
         for o in r['offcuts']:
+            from .procurement_receipts import claimed
+            if claimed(p,o['warehouse'],o['lot_code']):inv.fail('该库位批号已用于采购收货，不得重复登记为新余料')
             if (o['warehouse'].strip(),o['lot_code'].strip()) in existing:inv.fail('新余料编号已被完整原材或其他代余料使用，停用后也不能复用')
     return computed,inv.proofs(p,refs)
 

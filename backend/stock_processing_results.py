@@ -170,6 +170,8 @@ def prepare(p,raw):
         used=accounted.get((src['id'],r['allocation_index']),0);limit=next(a['quantity'] for a in src['allocations'] if a['allocation_index']==r['allocation_index'])
         if r['quantity']+used>limit:inv.fail('来源投入加工根数已被其他验收占用，请刷新并按未核对根数登记')
         for o in r['offcuts']:
+            from .procurement_receipts import claimed
+            if claimed(p,o['warehouse'],o['lot_code']):inv.fail('该库位批号已用于采购收货，不得重复登记为余料')
             if any((c['input']['warehouse'].strip(),c['input']['lot_code'].strip())==(o['warehouse'].strip(),o['lot_code'].strip()) for c in p['stock_receipts']):
                 inv.fail('余料编号须与原材批号区分，不能重复登记同仓库同编号')
             if any((l['warehouse'].strip(),l['lot_code'].strip())==(o['warehouse'].strip(),o['lot_code'].strip()) for l in lots):
