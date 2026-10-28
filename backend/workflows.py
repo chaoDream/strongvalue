@@ -73,7 +73,11 @@ def review_batch_targets(pid: str, collection: str, a=Depends(core.actor)):
             objects = [x for x in objects if x['id'] == p['pricing_bases'][-1]['id']]
         if collection == 'procurement_requests':
             from .procurement_requests import cancelled
-            objects = [x for x in objects if not cancelled(p,x['id'])]
+            from .procurement_orders import summary
+            objects = [x for x in objects if not cancelled(p,x['id']) and not summary(p,x['id'])]
+        if collection == 'procurement_orders':
+            from .procurement_orders import latest
+            objects = [x for x in objects if latest(p,x['input']['requisition_id'])['id']==x['id']]
         if collection == 'document_requests':
             objects = [x for x in objects if x['state'] == 'submitted']
         if collection in ('stock_operations', 'stock_offcut_issues'):

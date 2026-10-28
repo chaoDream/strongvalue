@@ -109,6 +109,8 @@ def reviewable(p,row,a):
     records(p)
     if row['author']==a['username']:raise HTTPException(403,'内部采购申请须由非编制人独立复核')
     if cancelled(p,row['id']):raise HTTPException(409,'内部采购申请已取消，仅供追溯，不能重审')
+    from .procurement_orders import summary
+    if summary(p,row['id']):raise HTTPException(409,'申请已有已下单订单登记，仅供追溯，不能重审')
 
 
 def status(p,row):
@@ -119,7 +121,9 @@ def status(p,row):
         try:
             if offers.proof(p,event['evidence_id'])!=event['proof']:raise HTTPException(409,'取消依据已变化；取消事实保留，须另行核查')
         except HTTPException as e:cancel_issue=str(e.detail)
-    return dict(record=row,object_hash=store.digest(row),phase='cancelled' if event else row['state'],current=not issue,issue=issue,review_valid=not issue and approved(p,COLLECTION,row),cancellation=event,cancellation_issue=cancel_issue,overdue=not event and row['input']['required_by']<today().isoformat())
+    from .procurement_orders import summary
+    order=summary(p,row['id'])
+    return dict(record=row,object_hash=store.digest(row),order=order,phase='order_registered' if order else 'cancelled' if event else row['state'],current=not issue,issue=issue,review_valid=not issue and approved(p,COLLECTION,row),cancellation=event,cancellation_issue=cancel_issue,overdue=not event and row['input']['required_by']<today().isoformat())
 
 
 def retry(p,request_id,digest,actor,collection):
@@ -179,6 +183,8 @@ def cancel(pid:str,rid:str,body:CancelIn,a=Depends(core.actor)):
         p=core.project(c,pid,a);records(p);digest=store.digest(dict(target_id=rid,**body.model_dump()));old=retry(p,body.request_id,digest,a,EVENTS)
         if old:return old
         row=core.find(p,COLLECTION,rid)
+        from .procurement_orders import summary
+        if summary(p,rid):raise HTTPException(409,'申请已有已下单订单登记，不能通过内部取消撤销外部事实')
         if not body.not_ordered_confirmed:raise HTTPException(422,'须据原件确认尚未对外下单，内部取消不能撤销外部订单或收货')
         if store.digest(row)!=body.object_hash or cancelled(p,rid):raise HTTPException(409,'申请已变化或已取消，请重新读取核对')
         event=analyses.seal(dict(id=store.uid(),request_id=body.request_id,request_hash=digest,operation='cancel',target_id=rid,record_hash=store.digest(row),reason=body.reason,evidence_id=body.evidence_id,proof=offers.proof(p,body.evidence_id),not_ordered_confirmed=True,author=a['username'],created_at=store.now()))
